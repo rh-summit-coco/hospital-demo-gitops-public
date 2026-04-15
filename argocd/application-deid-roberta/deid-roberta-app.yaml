@@ -1,0 +1,53 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: hospital-janine-app
+  namespace: openshift-gitops  # Namespace where ArgoCD is installed
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io  # Ensures proper cleanup on deletion
+spec:
+  project: default  # ArgoCD project (use 'default' or create custom projects)
+
+  # Source: Where to find your application manifests
+  source:
+    repoURL: https://github.com/rh-summit-coco/hospital-demo-gitops.git  # Your Git repository URL
+    targetRevision: prod  # Branch, tag, or commit SHA to monitor
+    path: application/deid-roberta/manifests  # Path within the repository containing Kubernetes manifests
+    # Directory settings
+    directory:
+      recurse: true  # Recursively include all YAML files in subdirectories
+
+  # Ignore fields that OpenShift auto-populates (e.g., Route host)
+  ignoreDifferences:
+    - group: route.openshift.io
+      kind: Route
+      jsonPointers:
+        - /spec/host
+        - /spec/path
+        - /spec/alternateBackends
+
+  # Destination: Where to deploy the application
+  destination:
+    server: https://api.eespositcococluster.westus.aroapp.io:6443 # Remote cluster
+    namespace: janine-app  # Target namespace where resources will be deployed
+
+  # Sync Policy: How ArgoCD should manage the application
+  syncPolicy:
+    # Automated sync settings
+    automated:
+      prune: true  # Automatically delete resources removed from Git
+      selfHeal: true  # Automatically sync if cluster state drifts from Git
+      allowEmpty: false  # Don't allow empty applications
+    # Sync options
+    syncOptions:
+      - CreateNamespace=true  # Create the namespace if it doesn't exist
+      - ServerSideApply=true  # Use server-side apply for better conflict resolution
+      - RespectIgnoreDifferences=true  # Respect fields marked to ignore differences
+    # Retry configuration for failed syncs
+    retry:
+      limit: 5  # Maximum number of retry attempts
+      backoff:
+        duration: 5s  # Initial wait time before retry
+        factor: 2  # Exponential backoff multiplier
+        maxDuration: 3m  # Maximum wait time between retries
+

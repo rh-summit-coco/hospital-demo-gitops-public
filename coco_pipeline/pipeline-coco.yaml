@@ -1,0 +1,143 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: coco-pipeline
+  namespace: janine-dev
+spec:
+  description: |
+    CoCo pipeline: pull cococtl, pull app repo, auth to cluster, run cococtl init and apply.
+  params:
+    - default: 'https://github.com/esposem/cococtl'
+      description: cococtl repository URL
+      name: cococtl-repo-url
+      type: string
+    - default: improvements
+      description: cococtl branch
+      name: cococtl-branch
+      type: string
+    - default: 'https://github.com/rh-summit-coco/hospital-demo-gitops.git'
+      description: App repository URL (requires auth)
+      name: app-repo-url
+      type: string
+    - default: prod
+      description: App repository branch
+      name: app-repo-branch
+      type: string
+    - default: application/deid-roberta/templates/deployment.yaml
+      description: Source manifest file
+      name: source-manifest
+      type: string
+    - name: target-manifest-dir
+      description: Target manifest directory (output for coco manifests)
+      default: application/deid-roberta/manifests
+      type: string
+    - default: kata-remote
+      description: Runtime class for CoCo
+      name: runtime-class
+      type: string
+    - default: trustee-operator-system
+      description: Trustee namespace
+      name: trustee-namespace
+      type: string
+    - default: quay.io/confidential-devhub/coco-secure-access-sidecar:latest
+      description: CoCo secure access sidecar image reference
+      name: sidecar-image
+      type: string
+    - default: quay.io/confidential-devhub/attestation-collector-sidecar-secure:latest
+      description: Beacon/attestation sidecar image reference (use digest after build_pipeline cosign)
+      name: beacon-sidecar-image
+      type: string
+  tasks:
+    - name: pull-cococtl
+      params:
+        - name: cococtl-repo-url
+          value: $(params.cococtl-repo-url)
+        - name: cococtl-branch
+          value: $(params.cococtl-branch)
+      taskRef:
+        kind: Task
+        name: pull-cococtl
+      workspaces:
+        - name: shared-ws
+          workspace: shared-ws
+
+    - name: pull-repo
+      params:
+        - name: repo-url
+          value: $(params.app-repo-url)
+        - name: branch
+          value: $(params.app-repo-branch)
+        - name: subdirectory
+          value: app-repo
+      taskRef:
+        kind: Task
+        name: pull-repo
+      workspaces:
+        - name: shared-ws
+          workspace: shared-ws
+        - name: ssh-directory
+          workspace: git-credentials-ws
+        - name: basic-auth
+          workspace: git-credentials-ws
+
+    - name: auth-cluster
+      taskRef:
+        kind: Task
+        name: auth-cluster
+      workspaces:
+        - name: shared-ws
+          workspace: shared-ws
+
+    - name: inject-beacon-sidecar
+      params:
+        - name: source-manifest
+          value: $(params.source-manifest)
+        - name: repo-subdirectory
+          value: app-repo
+        - name: beacon-sidecar-image
+          value: $(params.beacon-sidecar-image)
+      runAfter:
+        - pull-repo
+        - auth-cluster
+      taskRef:
+        kind: Task
+        name: inject-beacon-sidecar
+      workspaces:
+        - name: shared-ws
+          workspace: shared-ws
+
+    - name: run-cococtl
+      params:
+        - name: source-manifest
+          value: $(params.source-manifest)
+        - name: target-manifest-dir
+          value: $(params.target-manifest-dir)
+        - name: runtime-class
+          value: $(params.runtime-class)
+        - name: trustee-namespace
+          value: $(params.trustee-namespace)
+        - name: repo-subdirectory
+          value: app-repo
+        - name: sidecar-image
+          value: $(params.sidecar-image)
+      runAfter:
+        - pull-cococtl
+        - pull-repo
+        - auth-cluster
+        - inject-beacon-sidecar
+      taskRef:
+        kind: Task
+        name: run-cococtl
+      workspaces:
+        - name: shared-ws
+          workspace: shared-ws
+        - name: ssh-directory
+          workspace: git-credentials-ws
+        - name: basic-auth
+          workspace: git-credentials-ws
+  workspaces:
+    - description: 'Shared workspace for cococtl, app repo, kubeconfig, coco config and certs'
+      name: shared-ws
+    - description: Git credentials (same secret as update-gitops) for pull-repo
+      name: git-credentials-ws
+      optional: true

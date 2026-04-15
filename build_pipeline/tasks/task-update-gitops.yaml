@@ -1,0 +1,194 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  annotations:
+    tekton.dev/categories: Git
+    tekton.dev/displayName: update gitops
+    tekton.dev/pipelines.minVersion: 0.17.0
+    tekton.dev/platforms: linux/amd64,linux/s390x,linux/ppc64le,linux/arm64
+    tekton.dev/tags: git,gitops
+  labels:
+    app.kubernetes.io/version: '0.1'
+  name: update-gitops
+  namespace: janine-dev
+spec:
+  description: |
+    Updates the GitOps repository with the new image digest.
+    Clones the GitOps repo, updates the deployment.yaml with the image digest,
+    commits and pushes the changes.
+  params:
+  - description: GitOps repository URL to update
+    name: gitops-repo-url
+    type: string
+  - description: Git branch to update
+    name: gitops-branch
+    type: string
+    default: main
+  - description: Path to the deployment.yaml file in the repo
+    name: deployment-path
+    type: string
+    default: application/deployment.yaml
+  - description: Full image reference with digest (e.g., quay.io/user/image@sha256:...)
+    name: image-digest
+    type: string
+  - description: Image name for YAML path matching
+    name: image-name
+    type: string
+  - description: Git user name for commit
+    name: git-user-name
+    type: string
+    default: Tekton Pipeline
+  - description: Git user email for commit
+    name: git-user-email
+    type: string
+    default: tekton@openshift.local
+  - description: Commit message
+    name: commit-message
+    type: string
+    default: "Update image digest from pipeline"
+  results:
+  - description: The commit SHA that was pushed
+    name: commit
+    type: string
+  steps:
+  - computeResources: {}
+    image: registry.redhat.io/ubi9/ubi:latest
+    name: update-and-push
+    script: |
+      #!/bin/bash
+      set -e
+
+      echo "🔄 Updating GitOps repository with new image digest"
+      echo "===================================================="
+      echo "Repository: $(params.gitops-repo-url)"
+      echo "Branch: $(params.gitops-branch)"
+      echo "Deployment Path: $(params.deployment-path)"
+      echo "Image Digest: $(params.image-digest)"
+      echo ""
+
+      # Install required tools
+      echo "📦 Installing required tools..."
+      dnf install -y git > /dev/null 2>&1
+
+      # Setup git config
+      git config --global user.name "$(params.git-user-name)"
+      git config --global user.email "$(params.git-user-email)"
+
+      # Setup authentication
+      if [ -d "$(workspaces.ssh-directory.path)" ] && [ "$(ls -A $(workspaces.ssh-directory.path) 2>/dev/null)" ]; then
+        echo "🔐 Setting up SSH authentication..."
+        mkdir -p ~/.ssh
+        cp -R "$(workspaces.ssh-directory.path)"/* ~/.ssh/ 2>/dev/null || true
+        chmod 700 ~/.ssh
+        chmod 600 ~/.ssh/* 2>/dev/null || true
+        ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+        echo "✅ SSH authentication configured"
+      fi
+      if [ -f "$(workspaces.basic-auth.path)/.git-credentials" ]; then
+        echo "🔐 Setting up basic authentication..."
+        mkdir -p ~/.git
+        cp "$(workspaces.basic-auth.path)/.git-credentials" ~/.git-credentials
+        if [ -f "$(workspaces.basic-auth.path)/.gitconfig" ]; then
+          cp "$(workspaces.basic-auth.path)/.gitconfig" ~/.gitconfig
+        fi
+        chmod 400 ~/.git-credentials
+        git config --global credential.helper store
+        git config --global user.name "Tekton Pipeline" || true
+        git config --global user.email "tekton@openshift.local" || true
+        echo "✅ Git credentials configured"
+      else
+        echo "❌ Error: No authentication credentials found"
+        ls -la "$(workspaces.basic-auth.path)" 2>/dev/null || echo "   Basic auth workspace not accessible"
+        exit 1
+      fi
+
+      # Clone the GitOps repository
+      echo "📥 Cloning GitOps repository..."
+      WORKSPACE_DIR=$(workspaces.gitops-ws.path)
+      REPO_DIR="$WORKSPACE_DIR/gitops-repo"
+
+      rm -rf "$REPO_DIR"
+      git clone --branch "$(params.gitops-branch)" --depth 1 "$(params.gitops-repo-url)" "$REPO_DIR"
+      cd "$REPO_DIR"
+
+      # Verify deployment file exists
+      DEPLOYMENT_FILE="$(params.deployment-path)"
+      if [ ! -f "$DEPLOYMENT_FILE" ]; then
+        echo "❌ Error: Deployment file not found at $DEPLOYMENT_FILE"
+        exit 1
+      fi
+
+      echo "📝 Updating deployment file..."
+      echo "   File: $DEPLOYMENT_FILE"
+
+      export IMAGE_WITH_DIGEST="$(params.image-digest)"
+      export IMAGE_NAME="$(params.image-name)"
+
+      # Search for the image line containing the image name and replace the entire image value
+      # Pattern: image: quay.io/.../hospital-janine-app:main -> image: quay.io/.../hospital-janine-app@sha256:...
+      # Pattern: image: quay.io/.../hospital-janine-app@sha256:old -> image: quay.io/.../hospital-janine-app@sha256:new
+
+      if grep -q "image:.*$IMAGE_NAME" "$DEPLOYMENT_FILE"; then
+        echo "   Found image line with $IMAGE_NAME"
+        echo "   Replacing with: $IMAGE_WITH_DIGEST"
+        IMAGE_WITH_DIGEST="$(printf '%s' "$IMAGE_WITH_DIGEST")"
+        sed -i -E "s|^( *image:)[[:space:]]*(${IMAGE_NAME}[^[:space:]]*)|\1 $IMAGE_WITH_DIGEST|" "$DEPLOYMENT_FILE"
+      else
+        echo "❌ Error: Could not find image line containing '$IMAGE_NAME' in $DEPLOYMENT_FILE"
+        exit 1
+      fi
+
+      # Verify the update
+      UPDATED_IMAGE=$(cat "$DEPLOYMENT_FILE" | grep "image:")
+      echo "   Updated image: $UPDATED_IMAGE"
+
+      # Check if there are changes
+      if git diff --quiet "$DEPLOYMENT_FILE"; then
+        echo "ℹ️  No changes detected in deployment file (image may already be at this digest)"
+        COMMIT_SHA=$(git rev-parse HEAD)
+        echo "$COMMIT_SHA" > $(results.commit.path)
+        exit 0
+      fi
+
+      # Show the diff
+      echo ""
+      echo "📋 Changes to be committed:"
+      git diff "$DEPLOYMENT_FILE" || true
+      echo ""
+
+      # Stage and commit
+      echo "💾 Committing changes..."
+      git add "$DEPLOYMENT_FILE"
+      git commit -m "$(params.commit-message)
+
+      Image: $IMAGE_WITH_DIGEST
+      Updated by: Tekton Pipeline
+      Pipeline Run: ${PIPELINE_RUN_NAME:-unknown}"
+
+      # Push to remote
+      echo "📤 Pushing to remote repository..."
+      git push origin "$(params.gitops-branch)"
+
+      # Save commit SHA
+      COMMIT_SHA=$(git rev-parse HEAD)
+      echo "$COMMIT_SHA" > $(results.commit.path)
+
+      echo ""
+      echo "✅ Successfully updated GitOps repository"
+      echo "   Commit: $COMMIT_SHA"
+      echo "   Branch: $(params.gitops-branch)"
+      echo "   ArgoCD will automatically detect and sync the changes"
+  workspaces:
+  - name: gitops-ws
+    description: Workspace for cloning and updating the GitOps repository
+  - name: ssh-directory
+    description: |
+      A .ssh directory with private key, known_hosts, config, etc.
+      Used to authenticate with the git remote when pushing.
+    optional: true
+  - name: basic-auth
+    description: |
+      A Workspace containing a .gitconfig and .git-credentials file.
+      Used for HTTPS authentication with the git remote.
+    optional: true
+

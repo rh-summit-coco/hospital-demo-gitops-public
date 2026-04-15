@@ -1,0 +1,54 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    labels:
+        app: deid-roberta
+    name: deid-roberta
+    namespace: janine-app
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: deid-roberta
+    template:
+        metadata:
+            labels:
+                app: deid-roberta
+        spec:
+            containers:
+                - env:
+                    - name: UVICORN_DISABLE_IPV6
+                      value: "true"
+                    - name: AZURE_STORAGE_CONNECTION_STRING
+                      valueFrom:
+                        secretKeyRef:
+                          name: azure
+                          key: connection-string
+                  image: quay.io/confidential-devhub/hospital-janine-app@sha256:8f2e4506b67a465e42e3d26d003eced8d5c65559a7d8fd7cfe62e9b6759bba95
+                  imagePullPolicy: Always
+                  livenessProbe:
+                    httpGet:
+                        path: /health
+                        port: 8080
+                    initialDelaySeconds: 60
+                    periodSeconds: 30
+                    timeoutSeconds: 5
+                  name: deid-roberta
+                  ports:
+                    - containerPort: 8080
+                      name: http
+                      protocol: TCP
+                  readinessProbe:
+                    httpGet:
+                        path: /health
+                        port: 8080
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                    timeoutSeconds: 5
+                  resources:
+                    limits:
+                        cpu: 2000m
+                        memory: 4Gi
+                    requests:
+                        cpu: 500m
+                        memory: 2Gi

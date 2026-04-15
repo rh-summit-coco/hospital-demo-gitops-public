@@ -1,0 +1,70 @@
+---
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: cvm-pipeline
+  namespace: janine-dev
+  labels:
+    app.kubernetes.io/name: cvm-pipeline
+spec:
+  description: |
+    Pipeline to build the Ansible container image and push to internal registry
+
+  workspaces:
+    - name: azure-ssh-key
+      description: SSH key for Azure VM access
+    - name: source
+      description: Workspace for source code
+
+  params:
+    - name: CVM_DEPLOY_ENCRYPT_DISK
+      type: string
+      default: "true"
+
+  tasks:
+    - name: create-azure-vm
+      taskRef:
+        name: create-azure-vm
+
+    - name: create-aws-vm
+      taskRef:
+        name: create-aws-vm
+
+    - name: configure-vm
+      taskRef:
+        name: configure-vm
+      runAfter:
+        - create-azure-vm
+        - create-aws-vm
+      workspaces:
+        - name: ssh-key
+          workspace: azure-ssh-key
+        - name: source
+          workspace: source
+      params:
+        - name: VM_LIST
+          value: |
+            [
+              {"ip": "$(tasks.create-azure-vm.results.VM_IP)", "user": "azureuser"},
+              {"ip": "$(tasks.create-aws-vm.results.VM_IP)", "user": "cloud-user"}
+            ]
+        - name: CVM_DEPLOY_ENCRYPT_DISK
+          value: $(params.CVM_DEPLOY_ENCRYPT_DISK)
+
+    - name: deploy-workload-vm
+      taskRef:
+        name: deploy-workload-vm
+      runAfter:
+        - configure-vm
+      workspaces:
+        - name: ssh-key
+          workspace: azure-ssh-key
+        - name: source
+          workspace: source
+      params:
+        - name: VM_LIST
+          value: |
+            [
+              {"ip": "$(tasks.create-azure-vm.results.VM_IP)", "user": "azureuser"},
+              {"ip": "$(tasks.create-aws-vm.results.VM_IP)", "user": "cloud-user"}
+            ]

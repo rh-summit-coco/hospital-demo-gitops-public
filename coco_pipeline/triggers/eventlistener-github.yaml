@@ -1,0 +1,38 @@
+# EventListener that triggers coco-pipeline when GitHub receives a push to main
+# authored by tekton@openshift.local (e.g. after build pipeline updates GitOps).
+# Configure the GitOps repo webhook to point to this listener's route.
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: coco-github-listener
+  namespace: janine-dev
+spec:
+  serviceAccountName: pipeline
+  triggers:
+    - name: coco-github-push-trigger
+      bindings:
+        - ref: coco-github-push-binding
+      template:
+        ref: coco-pipeline-from-github-template
+      interceptors:
+        # Filter for push events only and validate GitHub webhook (same secret as ArgoCD webhook)
+        - ref:
+            name: "github"
+          params:
+            - name: "secretRef"
+              value:
+                secretName: github-webhook-secret
+                secretKey: secret
+            - name: "eventTypes"
+              value:
+                - "push"
+        # Only prod branch; set extensions.branch_name so TriggerBinding gets app-repo-branch
+        - ref:
+            name: "cel"
+          params:
+            - name: "filter"
+              value: "body.ref == 'refs/heads/prod' && body.head_commit.author.email == 'tekton@openshift.local'"
+            - name: "overlays"
+              value:
+                - key: branch_name
+                  expression: "body.ref.replace('refs/heads/', '')"

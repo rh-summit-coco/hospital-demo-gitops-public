@@ -1,0 +1,38 @@
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: cvm-deployment-listener
+  namespace: janine-dev
+spec:
+  serviceAccountName: pipeline
+  triggers:
+    - name: cvm-deployment-push-trigger
+      bindings:
+        - ref: cvm-deployment-github-binding
+      template:
+        ref: cvm-deployment-pipeline-template
+      interceptors:
+        # Filter for push events only and validate GitHub webhook
+        - ref:
+            name: "github"
+          params:
+            - name: "eventTypes"
+              value:
+                - "push"
+        # Filter for changes in application/deid-roberta/manifests/deployment.yaml path
+        - ref:
+            name: "cel"
+          params:
+            - name: "filter"
+              value: |
+                body.ref == 'refs/heads/prod' &&
+                body.head_commit.author.email == 'coco@openshift.local' &&
+                (
+                  size(body.commits) > 0 &&
+                  (
+                    // Check if any file in any commit is application/deid-roberta/manifests/deployment.yaml
+                    body.commits.exists(c, c.added.exists(f, f == 'application/deid-roberta/manifests/deployment.yaml')) ||
+                    body.commits.exists(c, c.modified.exists(f, f == 'application/deid-roberta/manifests/deployment.yaml'))
+                  )
+                )

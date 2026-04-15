@@ -1,0 +1,32 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: EventListener
+metadata:
+  name: github-listener
+  namespace: janine-dev
+spec:
+  serviceAccountName: pipeline
+  triggers:
+    - name: github-push-trigger
+      bindings:
+        - ref: github-push-binding
+      template:
+        ref: build-push-sign-template
+      interceptors:
+        # Filter for push events only and validate GitHub webhook
+        - ref:
+            name: "github"
+          params:
+            - name: "secretRef"
+              value:
+                secretName: github-webhook-secret
+                secretKey: secret
+            - name: "eventTypes"
+              value:
+                - "push"
+        # Filter for main branch only and ignore commits pushed by the pipeline (Tekton)
+        - ref:
+            name: "cel"
+          params:
+            - name: "filter"
+              value: "body.ref == 'refs/heads/main'"
+

@@ -1,0 +1,267 @@
+// Jenkins pipeline equivalent of Tekton cvm_pipeline/pipeline-cvm.yaml and tasks.
+// Intended for RHEL agents (label 'rhel' — change agent { label 'rhel' } as needed).
+//
+// Container images from Tekton → RHEL agent RPMs / CLI:
+//   mcr.microsoft.com/azure-cli     → azure-cli (packages-microsoft-prod)
+//   public.ecr.aws/aws-cli/aws-cli  → AWS CLI v2 zip (curl + unzip + aws/install)
+//   openshift-pipelines git-init      → git + https clone
+//   cvm-ansible image               → ansible-core, openssh-clients, python3-pyyaml (dnf)
+//
+// Required Jenkins credentials (IDs — rename in environment/withCredentials if you prefer):
+//   Azure service principal: used only in stage "Azure VM" (string Azure-SP-Tenant-ID + username/password Azure-SP-Secret → client id + secret)
+//   Trustee KBS URL + PEM: written by stage "Trustee metadata" (see cvm_pipeline/scripts/write-trustee-metadata.sh); optional param CVM_DEPLOY_TRUSTEE_KBS_CERT overrides embedded PEM
+//   SSH Username with private key: bigrock-ssh-key (private key for VM access; .pub optional on agent)
+//   Secret file: aws-credentials-file (contents of ~/.aws/credentials for the AWS stage)
+
+pipeline {
+  agent { label 'litian-rhel10' }
+
+  options {
+    timestamps()
+    disableConcurrentBuilds()
+  }
+
+  parameters {
+    booleanParam(name: 'DEPLOY_TRUSTEE_SERVER', defaultValue: false, description: 'When true, run the Deploy Trustee server stage')
+    string(name: 'TRUSTEE_SERVER_IP', defaultValue: '', description: 'IP address of the Trustee server')
+    string(name: 'CVM_DEPLOY_ENCRYPT_DISK', defaultValue: 'true', description: 'Passed to vm-configure Ansible role')
+    string(name: 'GIT_BRANCH', defaultValue: 'prod', description: 'Branch for optional git fetch in Configure (if USE_GIT_FETCH=true)')
+    string(name: 'GIT_URL', defaultValue: 'github.com/rh-summit-coco/hospital-demo-gitops.git', description: 'Repo for USE_GIT_FETCH')
+    string(name: 'CVM_DEPLOY_TRUSTEE_KBS_URL', defaultValue: 'https://kbs-service-trustee-operator-system.apps.uml9d8rjadd09bf3f0.eastus.aroapp.io', description: 'Trustee KBS URL')
+    text(name: 'CVM_DEPLOY_TRUSTEE_KBS_CERT', defaultValue: '', description: 'Trustee KBS PEM')
+  }
+
+  environment {
+    // Pipeline params (Tekton: pipeline param CVM_DEPLOY_ENCRYPT_DISK)
+    CVM_DEPLOY_ENCRYPT_DISK = "${params.CVM_DEPLOY_ENCRYPT_DISK}"
+    GIT_BRANCH_PARAM        = "${params.GIT_BRANCH}"
+    GIT_URL_PARAM           = "${params.GIT_URL}"
+    TRUSTEE_SERVER_IP       = "${params.TRUSTEE_SERVER_IP}"
+    CVM_DEPLOY_TRUSTEE_KBS_URL = "${params.CVM_DEPLOY_TRUSTEE_KBS_URL}"
+    CVM_DEPLOY_TRUSTEE_KBS_CERT = "${params.CVM_DEPLOY_TRUSTEE_KBS_CERT}"
+    TRUSTEE_SERVER_SSH_USER = 'azureuser'
+    // Controller path for deploy-trustee-server.yml (kbs_default/, reference-values.json, default_cpu.rego)
+    TRUSTEE_SECRETS_SOURCE_DIR = '/root/jenkins/secrets'
+    // Set to true after successful "Deploy Trustee server (Ansible)"; vm-configure reads this
+    CVM_DEPLOY_SECRET_REGISTRATION_CLIENT = 'false'
+
+    // Defaults aligned with Tekton tasks
+    AZURE_SUBSCRIPTION_ID = '1a84145c-974c-4237-9046-64a34c09752f'
+    RESOURCE_GROUP   = 'nodejs-ex-vm-rg'
+    AZURE_VM_NAME    = 'deid-roberta-azure-jenkins-vm'
+    AZURE_VM_IMAGE   = 'RedHat:rhel-cvm:10_1_cvm:latest'
+    AZURE_VM_SIZE    = 'Standard_DC2as_v5'
+    AZURE_LOCATION   = 'eastus'
+    DATA_DISK_SIZE   = '10'
+    AWS_VM_NAME      = 'deid-roberta-aws-jenkins-vm'
+    AMI_ID           = 'ami-02762b8edc35b8024'
+    INSTANCE_TYPE    = 'm6a.large'
+    AWS_REGION       = 'us-east-2'
+    // SUBNET_ID        = 'subnet-062466bbf61dec451'
+    // SECURITY_GROUP_ID = 'sg-060626dc4f93b862e'
+    KEY_PAIR_NAME    = 'bigrock-demo'
+    AWS_DATA_DISK    = '10'
+    CVM_SYSTEM_ROLE_REPO_URL     = 'https://github.com/litian1992/trustee_client'
+    CVM_SYSTEM_ROLE_REPO_BRANCH  = 'main'
+    CVM_DEPLOY_ENCRYPTED_DISK_MOUNT_POINT = '/mnt/encrypted'
+  }
+
+  stages {
+
+    stage('Checkout') {
+      steps {
+        checkout scm
+      }
+    }
+
+    // stage('Deploy Trustee server (Ansible)') {
+    //   when {
+    //     expression { return params.DEPLOY_TRUSTEE_SERVER }
+    //   }
+    //   steps {
+    //     withCredentials([
+    //       sshUserPrivateKey(credentialsId: 'bigrock-ssh-key', keyFileVariable: 'SSH_KEY_FILE', usernameVariable: 'SSH_USER_UNUSED')
+    //     ]) {
+    //       sh '''
+    //         set -euo pipefail
+    //         export SERVER_IP='[{"ip":"'${TRUSTEE_SERVER_IP}'","user":"'${TRUSTEE_SERVER_SSH_USER}'"}]'
+    //         export DEPLOY_SECRET_REGISTRATION_SERVER="true"
+    //         export REPO_ROOT="${WORKSPACE}"
+
+    //         mkdir -p /tmp/ssh-key
+    //         cp "${SSH_KEY_FILE}" /tmp/ssh-key/id_rsa
+    //         chmod 600 /tmp/ssh-key/id_rsa
+    //         if [ -f "${SSH_KEY_FILE}.pub" ]; then
+    //           cp "${SSH_KEY_FILE}.pub" /tmp/ssh-key/id_rsa.pub
+    //           chmod 644 /tmp/ssh-key/id_rsa.pub
+    //         fi
+
+    //         ansible-playbook "${REPO_ROOT}/cvm_pipeline/ansible/deploy-trustee-server.yml"
+    //       '''
+    //     }
+    //     script {
+    //       // Enable secret registration client while server is deployed by us too.
+    //       env.CVM_DEPLOY_SECRET_REGISTRATION_CLIENT = 'true'
+    //     }
+    //   }
+    // }
+
+    stage('Create VMs') {
+      parallel {
+        stage('Azure VM') {
+          steps {
+            withCredentials([
+              sshUserPrivateKey(credentialsId: 'bigrock-ssh-key-global', keyFileVariable: 'SSH_KEY_FILE', usernameVariable: 'SSH_USER_UNUSED'),
+              string(credentialsId: 'azure-esposem-tennant-id', variable: 'AZURE_SP_TENANT_ID'),
+              usernamePassword(credentialsId: 'azure-esposem-coco-client', usernameVariable: 'AZURE_SP_SECRET_USR', passwordVariable: 'AZURE_SP_SECRET_PSW')
+            ]) {
+              sh '''
+                set -euo pipefail
+                mkdir -p "${WORKSPACE}/.cvm"
+                export SSH_PUB_KEY="$(ssh-keygen -y -f "${SSH_KEY_FILE}" 2>/dev/null || cat "${SSH_KEY_FILE}.pub")"
+
+                az login --service-principal -u "$AZURE_SP_SECRET_USR" -p "$AZURE_SP_SECRET_PSW" --tenant "$AZURE_SP_TENANT_ID" >/dev/null
+                az account set --subscription "$AZURE_SUBSCRIPTION_ID"
+
+                if ! az group show --name "$RESOURCE_GROUP" &>/dev/null; then
+                  az group create --name "$RESOURCE_GROUP" --location "$AZURE_LOCATION"
+                fi
+
+                if ! az vm show --resource-group "$RESOURCE_GROUP" --name "$AZURE_VM_NAME" --query id -o tsv &>/dev/null; then
+                  az vm create \
+                    --resource-group "$RESOURCE_GROUP" \
+                    --name "$AZURE_VM_NAME" \
+                    --image "$AZURE_VM_IMAGE" \
+                    --size "$AZURE_VM_SIZE" \
+                    --admin-username azureuser \
+                    --ssh-key-values "$SSH_PUB_KEY" \
+                    --public-ip-sku Standard \
+                    --security-type ConfidentialVM \
+                    --enable-vtpm --enable-secure-boot \
+                    --os-disk-security-encryption-type DiskWithVMGuestState \
+                    --data-disk-sizes-gb "$DATA_DISK_SIZE"
+                  az vm open-port --resource-group "$RESOURCE_GROUP" --name "$AZURE_VM_NAME" --port 8080 --priority 1001
+                  az vm open-port --resource-group "$RESOURCE_GROUP" --name "$AZURE_VM_NAME" --port 8443 --priority 1002
+                  sleep 30
+                fi
+
+                VM_IP="$(az vm show -d --resource-group "$RESOURCE_GROUP" --name "$AZURE_VM_NAME" --query publicIps -o tsv)"
+                printf '%s' "$VM_IP" > "${WORKSPACE}/.cvm/azure_vm_ip"
+                echo "Azure VM IP: $VM_IP"
+              '''
+            }
+          }
+        }
+
+        stage('AWS VM') {
+          steps {
+            withCredentials([file(credentialsId: 'aws-credentials-bigrock', variable: 'AWS_SHARED_CREDENTIALS_FILE')]) {
+              sh '''
+                set -euo pipefail
+                mkdir -p "${WORKSPACE}/.cvm"
+                export AWS_SHARED_CREDENTIALS_FILE="${AWS_SHARED_CREDENTIALS_FILE}"
+                export AWS_DEFAULT_REGION="${AWS_REGION}"
+
+                VM_IP=$(aws ec2 describe-instances \
+                  --filters "Name=tag:Name,Values=${AWS_VM_NAME}" "Name=instance-state-name,Values=running" \
+                  --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+                if [ "$VM_IP" = "None" ] || [ -z "$VM_IP" ]; then
+                  aws ec2 run-instances \
+                    --image-id "${AMI_ID}" \
+                    --instance-type "${INSTANCE_TYPE}" \
+                    --key-name "${KEY_PAIR_NAME}" \
+                    --region "${AWS_REGION}" \
+                    --cpu-options AmdSevSnp=enabled \
+                    --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${AWS_VM_NAME}}]" \
+                    --block-device-mappings '[{"DeviceName":"/dev/sdb","Ebs":{"VolumeSize":'${AWS_DATA_DISK}',"DeleteOnTermination":true,"VolumeType":"gp3"}}]'
+                  for attempt in $(seq 1 60); do
+                    VM_IP=$(aws ec2 describe-instances \
+                      --filters "Name=tag:Name,Values=${AWS_VM_NAME}" "Name=instance-state-name,Values=running" \
+                      --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+                    [ -n "$VM_IP" ] && [ "$VM_IP" != "None" ] && break
+                    sleep 5
+                  done
+                fi
+                printf '%s' "$VM_IP" > "${WORKSPACE}/.cvm/aws_vm_ip"
+                echo "AWS VM IP: $VM_IP"
+              '''
+            }
+          }
+        }
+      }
+    }
+
+    stage('Trustee metadata') {
+      steps {
+        sh '''
+          set -euo pipefail
+          bash "${WORKSPACE}/cvm_pipeline/scripts/write-trustee-metadata.sh"
+        '''
+      }
+    }
+
+    stage('Configure VMs (Ansible)') {
+      steps {
+        withCredentials([
+          sshUserPrivateKey(credentialsId: 'bigrock-ssh-key-global', keyFileVariable: 'SSH_KEY_FILE', usernameVariable: 'SSH_USER_UNUSED')
+        ]) {
+          sh '''
+            set -euo pipefail
+            AZURE_IP="$(cat "${WORKSPACE}/.cvm/azure_vm_ip")"
+            AWS_IP="$(cat "${WORKSPACE}/.cvm/aws_vm_ip")"
+            export VM_LIST='[{"ip":"'${AZURE_IP}'","user":"azureuser"},{"ip":"'${AWS_IP}'","user":"cloud-user"}]'
+            export CVM_DEPLOY_ENCRYPT_DISK="${CVM_DEPLOY_ENCRYPT_DISK}"
+            export REPO_ROOT="${WORKSPACE}"
+            if [ -f "${WORKSPACE}/.cvm/kbs-url" ] && [ -f "${WORKSPACE}/.cvm/kbs-cert.pem" ]; then
+              export CVM_DEPLOY_TRUSTEE_KBS_URL="$(tr -d '\n\r' < "${WORKSPACE}/.cvm/kbs-url")"
+              export CVM_DEPLOY_TRUSTEE_KBS_CERT="$(cat "${WORKSPACE}/.cvm/kbs-cert.pem")"
+            fi
+
+            mkdir -p /tmp/ssh-key
+            cp "${SSH_KEY_FILE}" /tmp/ssh-key/id_rsa
+            chmod 600 /tmp/ssh-key/id_rsa
+            if [ -f "${SSH_KEY_FILE}.pub" ]; then
+              cp "${SSH_KEY_FILE}.pub" /tmp/ssh-key/id_rsa.pub
+              chmod 644 /tmp/ssh-key/id_rsa.pub
+            fi
+
+            ansible-playbook "${REPO_ROOT}/cvm_pipeline/ansible/vm-configure.yml"
+          '''
+        }
+      }
+    }
+
+    stage('Deploy workload (Ansible)') {
+      steps {
+        withCredentials([
+          sshUserPrivateKey(credentialsId: 'bigrock-ssh-key-global', keyFileVariable: 'SSH_KEY_FILE', usernameVariable: 'SSH_USER_UNUSED')
+        ]) {
+          sh '''
+            set -euo pipefail
+            AZURE_IP="$(cat "${WORKSPACE}/.cvm/azure_vm_ip")"
+            AWS_IP="$(cat "${WORKSPACE}/.cvm/aws_vm_ip")"
+            export VM_LIST='[{"ip":"'${AZURE_IP}'","user":"azureuser"},{"ip":"'${AWS_IP}'","user":"cloud-user"}]'
+            export REPO_ROOT="${WORKSPACE}"
+            export DEPLOYMENT_YAML_PATH="${REPO_ROOT}/application/deid-roberta/manifests/deployment.yaml"
+            export SECRET_YAML_PATH="${REPO_ROOT}/application/deid-roberta/manifests/deployment-sealed-secrets.yaml"
+            export DEPLOYMENT_PATCH_SCRIPT_PATH="${REPO_ROOT}/cvm_pipeline/ansible/deployment-patch.sh"
+            if [ -f "${WORKSPACE}/.cvm/kbs-url" ] && [ -f "${WORKSPACE}/.cvm/kbs-cert.pem" ]; then
+              export CVM_DEPLOY_TRUSTEE_KBS_URL="$(tr -d '\n\r' < "${WORKSPACE}/.cvm/kbs-url")"
+              export CVM_DEPLOY_TRUSTEE_KBS_CERT="$(cat "${WORKSPACE}/.cvm/kbs-cert.pem")"
+            fi
+
+            mkdir -p /tmp/ssh-key
+            cp "${SSH_KEY_FILE}" /tmp/ssh-key/id_rsa
+            chmod 600 /tmp/ssh-key/id_rsa
+            if [ -f "${SSH_KEY_FILE}.pub" ]; then
+              cp "${SSH_KEY_FILE}.pub" /tmp/ssh-key/id_rsa.pub
+              chmod 644 /tmp/ssh-key/id_rsa.pub
+            fi
+
+            ansible-playbook "${REPO_ROOT}/cvm_pipeline/ansible/deploy-k8s-to-podman.yml"
+          '''
+        }
+      }
+    }
+  }
+}

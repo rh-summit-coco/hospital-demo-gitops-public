@@ -1,0 +1,102 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: build-ansible-image
+  namespace: janine-dev
+  labels:
+    app.kubernetes.io/name: build-ansible-image
+spec:
+  description: |
+    Fetches the Containerfile and Ansible playbook, prepares build context with SSH keys,
+    and builds the container image using buildah.
+  params:
+    - name: git-url
+      type: string
+      description: Git repository URL
+      default: "github.com/rh-summit-coco/hospital-demo-gitops.git"
+    - name: git-branch
+      type: string
+      description: Git branch to checkout
+      default: "prod"
+    - name: image-name
+      type: string
+      description: Name of the image to build
+      default: "cvm-ansible"
+  results:
+    - name: IMAGE_URL
+      description: Full image URL that was built
+    - name: IMAGE_DIGEST
+      description: Digest of the built image
+  workspaces:
+    - name: source
+      description: Workspace for source code, build context, and buildah storage
+  steps:
+    - name: fetch-source
+      securityContext:
+        runAsUser: 0
+      image: registry.redhat.io/openshift-pipelines/pipelines-git-init-rhel9:v1.21.0
+      env:
+      - name: GIT_USERNAME
+        valueFrom:
+          secretKeyRef:
+            name: litian-git-credential
+            key: username
+      - name: GIT_PASSWORD
+        valueFrom:
+          secretKeyRef:
+            name: litian-git-credential
+            key: password
+      script: |
+        #!/bin/bash
+        set -e
+        GIT_URL=$(echo "$(params.git-url)" | sed 's|^https://||')
+        GIT_BRANCH=$(echo "$(params.git-branch)" | sed 's|^refs/heads/||')
+        /ko-app/git-init \
+          -url=https://${GIT_USERNAME}:${GIT_PASSWORD}@${GIT_URL} \
+          -revision=${GIT_BRANCH} \
+          -path=$(workspaces.source.path)
+    
+    - name: build-image
+      image: registry.redhat.io/rhel9/buildah:latest
+      script: |
+        #!/bin/bash
+        set -e
+
+        WORKSPACE="$(workspaces.source.path)/cvm_pipeline/ansible"
+        
+        # Build image
+        IMAGE_NAME="image-registry.openshift-image-registry.svc:5000/janine-dev/$(params.image-name):latest"
+        
+        echo "Building image: $IMAGE_NAME"
+        echo "Dockerfile: $WORKSPACE/Containerfile"
+        echo "Context: $WORKSPACE"
+        buildah build \
+          --root "$BUILDAH_STORAGE" \
+          --format=oci \
+          --tls-verify=false \
+          -f "$WORKSPACE/Containerfile" \
+          -t "$IMAGE_NAME" \
+          "$WORKSPACE"
+        
+        # Push image
+        echo ""
+        echo "📤 Pushing image to registry..."
+        PUSH_OUTPUT=$(buildah push \
+          --root "$BUILDAH_STORAGE" \
+          --tls-verify=false \
+          "$IMAGE_NAME" \
+          docker://"$IMAGE_NAME" 2>&1)
+        echo "$PUSH_OUTPUT"
+        
+        # Extract digest
+        IMAGE_DIGEST=$(echo "$PUSH_OUTPUT" | grep -oE 'sha256:[a-f0-9]{64}' | tail -1 || echo "")
+        
+        echo ""
+        echo "✅ Container image built and pushed successfully"
+        echo "🎯 Image: $IMAGE_NAME"
+        if [ -n "$IMAGE_DIGEST" ]; then
+          echo "🎯 Digest: $IMAGE_DIGEST"
+        fi
+      securityContext:
+        privileged: true
+      workingDir: $(workspaces.source.path)

@@ -1,0 +1,14 @@
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: cvm-deployment-github-binding
+  namespace: janine-dev
+spec:
+  params:
+    # Extract git repository URL from webhook payload
+    - name: git-url
+      value: $(body.repository.clone_url)
+    # Extract branch name
+    - name: git-branch
+      value: $(body.ref)

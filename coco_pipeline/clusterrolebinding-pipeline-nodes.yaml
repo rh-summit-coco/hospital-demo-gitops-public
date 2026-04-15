@@ -1,0 +1,26 @@
+# RBAC for pipeline SA (run-cococtl) - cococtl needs to list nodes for node IP auto-detection
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pipeline-list-nodes
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - nodes
+  verbs:
+  - get
+  - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: pipeline-list-nodes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: pipeline-list-nodes
+subjects:
+- kind: ServiceAccount
+  name: pipeline
+  namespace: janine-dev

@@ -1,0 +1,110 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: inject-beacon-sidecar
+  namespace: janine-dev
+spec:
+  description: |
+    Injects the coco-beacon-sidecar container and its volume into the deployment
+    template before cococtl runs. Runs after pull-repo and auth-cluster, before run-cococtl.
+    COLLECTOR_URL is resolved by querying the attestation-collector-secure route.
+  params:
+  - name: source-manifest
+    type: string
+    description: Source manifest path relative to repo (e.g. application/deid-roberta/templates/deployment.yaml)
+  - name: repo-subdirectory
+    type: string
+    default: app-repo
+    description: Subdirectory in shared-ws where app repo was cloned
+  - name: beacon-sidecar-image
+    type: string
+    default: quay.io/confidential-devhub/attestation-collector-sidecar-secure:latest
+    description: Beacon/attestation sidecar image reference (use digest e.g. from build_pipeline after cosign)
+  steps:
+  - name: inject
+    image: registry.redhat.io/ubi9/ubi:latest
+    script: |
+      #!/bin/bash
+      set -e
+      SHARED="$(workspaces.shared-ws.path)"
+      export PATH="$SHARED/bin:$PATH"
+      export KUBECONFIG="$SHARED/.kube/config"
+      REPO_DIR="$SHARED/$(params.repo-subdirectory)"
+      DEPLOYMENT_FILE="$REPO_DIR/$(params.source-manifest)"
+      if [ ! -f "$DEPLOYMENT_FILE" ]; then
+        echo "Deployment file not found: $DEPLOYMENT_FILE"
+        exit 1
+      fi
+      COLLECTOR_HOST=$(oc get route attestation-collector-secure -n raj-compliance-dashboard -o jsonpath='{.spec.host}' 2>/dev/null) || true
+      if [ -n "$COLLECTOR_HOST" ]; then
+        export COLLECTOR_URL="https://$COLLECTOR_HOST"
+        echo "Resolved COLLECTOR_URL from route: $COLLECTOR_URL"
+      else
+        export COLLECTOR_URL="https://attestation-collector-secure-raj-compliance-dashboard.apps.uml9d8rjadd09bf3f0.eastus.aroapp.io"
+        echo "Route not found, using default COLLECTOR_URL: $COLLECTOR_URL"
+      fi
+      export BEACON_SIDECAR_IMAGE="$(params.beacon-sidecar-image)"
+      dnf install -y python3-pip > /dev/null 2>&1
+      pip install --break-system-packages pyyaml 2>/dev/null || pip install pyyaml 2>/dev/null || true
+      export DEPLOYMENT_FILE
+      python3 - << 'PY'
+      import yaml
+      import os
+      deployment_path = os.environ["DEPLOYMENT_FILE"]
+      collector_url = os.environ.get("COLLECTOR_URL", "https://attestation-collector-secure-raj-compliance-dashboard.apps.uml9d8rjadd09bf3f0.eastus.aroapp.io")
+      beacon_sidecar_image = os.environ.get("BEACON_SIDECAR_IMAGE", "quay.io/confidential-devhub/attestation-collector-sidecar-secure:latest")
+      with open(deployment_path, "r") as f:
+          data = yaml.safe_load(f)
+
+      containers = data.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {}).setdefault("containers", [])
+      volumes = data["spec"]["template"]["spec"].setdefault("volumes", [])
+
+      beacon = {
+          "name": "coco-beacon-sidecar",
+          "image": beacon_sidecar_image,
+          "env": [
+              {"name": "POD_NAME", "valueFrom": {"fieldRef": {"fieldPath": "metadata.name"}}},
+              {"name": "POD_NAMESPACE", "valueFrom": {"fieldRef": {"fieldPath": "metadata.namespace"}}},
+              {"name": "COLLECTOR_URL", "value": collector_url},
+              {"name": "TEE_TYPE", "value": "snp"},
+              {"name": "REPORT_INTERVAL", "value": "30"},
+              {"name": "CLIENT_CERT_FILE", "value": "/etc/certs/client.crt"},
+              {"name": "CLIENT_KEY_FILE", "value": "/etc/certs/client.key"},
+              {"name": "CA_CERT_FILE", "value": "/etc/certs/ca.crt"},
+          ],
+          "volumeMounts": [
+              {"name": "client-certs", "mountPath": "/etc/certs", "readOnly": True},
+          ],
+      }
+      volume = {
+          "name": "client-certs",
+          "secret": {
+              "secretName": "attestation-collector-certs",
+              "items": [
+                  {"key": "client.crt", "path": "client.crt"},
+                  {"key": "client.key", "path": "client.key"},
+                  {"key": "ca.crt", "path": "ca.crt"},
+              ],
+          },
+      }
+
+      if not any(c.get("name") == "coco-beacon-sidecar" for c in containers):
+          containers.append(beacon)
+          print("Added coco-beacon-sidecar container")
+      else:
+          print("coco-beacon-sidecar container already present, skipping")
+
+      if not any(v.get("name") == "client-certs" for v in volumes):
+          volumes.append(volume)
+          print("Added client-certs volume")
+      else:
+          print("client-certs volume already present, skipping")
+
+      with open(deployment_path, "w") as f:
+          yaml.dump(data, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+      PY
+      echo "Injection complete. Deployment file: $DEPLOYMENT_FILE"
+      cat "$DEPLOYMENT_FILE" | head -100
+  workspaces:
+  - name: shared-ws
+    description: Shared workspace with cloned app repo

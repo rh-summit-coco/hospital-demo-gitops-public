@@ -1,0 +1,18 @@
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: deid-roberta-route
+  namespace: janine-app
+spec:
+  path: ''
+  to:
+    name: deid-roberta-sidecar
+    weight: 100
+    kind: Service
+  host: ''
+  tls:
+    insecureEdgeTerminationPolicy: None
+    termination: passthrough
+  port:
+    targetPort: https
+  alternateBackends: []

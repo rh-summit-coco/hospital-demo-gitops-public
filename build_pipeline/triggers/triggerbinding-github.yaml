@@ -1,0 +1,35 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: github-push-binding
+  namespace: janine-dev
+spec:
+  params:
+    # Extract git repository URL from webhook payload
+    - name: git-url
+      value: $(body.repository.clone_url)
+    # Extract git revision (commit SHA or branch)
+    - name: git-revision
+      value: $(body.head_commit.id)
+    # Extract branch name
+    - name: git-branch
+      value: $(body.ref)
+    # Use latest as image tag
+    - name: image-tag
+      value: latest
+    # Default image name
+    - name: image-name
+      value: hospital-janine-app
+    # Default destination repo
+    - name: dest-repo
+      value: quay.io/confidential-devhub
+    # Dockerfile path
+    - name: dockerfile-path
+      value: ./Dockerfile
+    # Repository name for reference
+    - name: repo-name
+      value: $(body.repository.name)
+    # Commit message
+    - name: commit-message
+      value: $(body.head_commit.message)
+

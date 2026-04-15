@@ -1,0 +1,36 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: pull-cococtl
+  namespace: janine-dev
+spec:
+  description: |
+    Installs git, make, go; clones cococtl from GitHub and builds it.
+  params:
+  - name: cococtl-repo-url
+    type: string
+    default: https://github.com/esposem/cococtl
+    description: cococtl repository URL
+  - name: cococtl-branch
+    type: string
+    default: improvements
+    description: Branch to clone
+  steps:
+  - name: install-and-build
+    image: registry.redhat.io/ubi9/ubi:latest
+    script: |
+      #!/bin/bash
+      set -e
+      echo "Installing git, make, go..."
+      dnf install -y git make go
+      echo "Cloning cococtl..."
+      cd $(workspaces.shared-ws.path)
+      git clone "$(params.cococtl-repo-url)" --branch "$(params.cococtl-branch)" cococtl
+      cd cococtl
+      echo "Building cococtl..."
+      make build
+      echo "Done. Binary at $(workspaces.shared-ws.path)/cococtl/"
+      ls -la
+  workspaces:
+  - name: shared-ws
+    description: Workspace where cococtl is cloned and built

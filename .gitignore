@@ -1,0 +1,117 @@
+# ======================================
+# SECURITY - SECRETS AND CREDENTIALS
+# ======================================
+# Template secrets (placeholders) live in argocd/, build_pipeline/secrets/,
+# application/trustee/, and application/deid-roberta/manifests/. Replace TODO
+# values before apply. For local overrides with real values, use filenames
+# like *-local.yaml or keep them outside the repo.
+
+# Azure credentials and configuration (local copies / generated)
+*azure-credentials*.yaml
+*azure-credentials*.yml
+*azure-config*.yaml
+*azure-config*.yml
+infrastructure/azure/*-local.yaml
+infrastructure/azure/*-secret*.yaml
+
+operators/sandboxed-containers/peer-pods-cm.yaml
+operators/sandboxed-containers/peer-pods-secret.yaml
+operators/sandboxed-containers/ssh-key-secret.yaml
+
+# Git and CI/CD (local token files only)
+.pipeline-config/git-credentials-secret.yaml
+*github-token*
+*pat-token*
+
+# Ansible fetch: may contain CDH/KBS patch output with secrets
+cvm_pipeline/ansible/fetch-logs/
+
+# SSH keys and certificates
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.p7b
+*.p7c
+id_rsa
+id_rsa.pub
+id_ed25519
+id_ed25519.pub
+
+# Environment files with secrets
+.env
+.env.local
+.env.*.local
+*.env
+
+# Database credentials
+*database*.yaml
+*database*.yml
+*db-secret*
+
+# API keys and tokens (narrow patterns)
+*api-key*
+*bearer-token*
+
+# Local development overrides
+CLAUDE.md
+*-local.*
+local-*
+
+# ======================================
+# GENERAL DEVELOPMENT FILES
+# ======================================
+
+# Temporary files
+*.tmp
+*.swp
+*.bak
+*~
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+*.sublime-workspace
+*.sublime-project
+
+# Build artifacts
+target/
+build/
+dist/
+*.class
+*.jar
+*.war
+
+# Logs
+*.log
+logs/
+*.log.*
+
+# Node modules (if any)
+node_modules/
+npm-debug.log*
+
+# Python artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.pytest_cache/
+
+# ======================================
+# GIT AND VERSION CONTROL
+# ======================================
+
+# Git filter-branch artifacts
+.git/refs/original/
+secrets_to_remove.txt
+
+# Backup files
+*.backup
+*.orig

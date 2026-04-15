@@ -1,0 +1,183 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: run-cococtl
+  namespace: janine-dev
+spec:
+  description: |
+    Runs cococtl init and apply with sidecar, kata-remote runtime, and trustee.
+  params:
+  - name: source-manifest
+    type: string
+    description: Source manifest file
+  - name: target-manifest-dir
+    type: string
+    description: Target manifest directory
+  - name: runtime-class
+    type: string
+    default: kata-remote
+    description: Runtime class for CoCo
+  - name: trustee-namespace
+    type: string
+    default: trustee-operator-system
+    description: Trustee namespace
+  - name: repo-subdirectory
+    type: string
+    default: app-repo
+    description: Subdirectory in shared-ws where app repo was cloned
+  - name: sidecar-image
+    type: string
+    default: ''
+    description: CoCo secure access sidecar image reference
+  steps:
+  - name: run-init-and-apply
+    image: registry.redhat.io/ubi9/ubi:latest
+    env:
+    - name: KUBECONFIG
+      value: $(workspaces.shared-ws.path)/.kube/config
+    script: |
+      #!/bin/bash
+      set -e
+
+      echo "SOURCE_MANIFEST: $(params.source-manifest)"
+      echo "TARGET_MANIFEST_DIR: $(params.target-manifest-dir)"
+      echo "REPO_SUBDIRECTORY: $(params.repo-subdirectory)"
+      echo "RUNTIME_CLASS: $(params.runtime-class)"
+      echo "TRUSTEE_NAMESPACE: $(params.trustee-namespace)"
+      echo "SHARED_WS: $(workspaces.shared-ws.path)"
+      echo "KUBECONFIG: $(workspaces.shared-ws.path)/.kube/config"
+      echo "SIDECAR_IMAGE: $(params.sidecar-image)"
+
+      SHARED="$(workspaces.shared-ws.path)"
+      export PATH="$SHARED/bin:$PATH"
+      export KUBECONFIG="$SHARED/.kube/config"
+
+      # Ensure kubectl/oc from auth-cluster are available and logged in
+      kubectl version --client
+      oc whoami
+
+      COCOCTL_BIN="$SHARED/cococtl/kubectl-coco"
+      REPO_DIR="$SHARED/$(params.repo-subdirectory)"
+      CERT_DIR="$REPO_DIR/certs"
+      CONFIG_FILE="$REPO_DIR/coco-config.toml"
+
+      if [ ! -f "$COCOCTL_BIN" ]; then
+        echo "cococtl binary not found at $COCOCTL_BIN"
+        exit 1
+      fi
+      if [ ! -f "$REPO_DIR/$(params.source-manifest)" ]; then
+        echo "App manifest not found at $REPO_DIR/$(params.source-manifest)"
+        exit 1
+      fi
+
+      cd "$REPO_DIR"
+
+      echo "Running cococtl init..."
+      "$COCOCTL_BIN" init \
+        --enable-sidecar \
+        -o "$CONFIG_FILE" \
+        --runtime-class "$(params.runtime-class)" \
+        --no-certs \
+        --no-upload \
+        --trustee-namespace="$(params.trustee-namespace)"
+
+      echo "Running cococtl apply..."
+      "$COCOCTL_BIN" apply \
+        -f "$(params.source-manifest)" \
+        --skip-apply \
+        --sidecar \
+        --sidecar-image "$(params.sidecar-image)" \
+        --sidecar-port-forward 8080 \
+        --no-initdata \
+        --convert-secrets \
+        --config "$CONFIG_FILE"
+
+      # Coco output is source-manifest with .yaml replaced by -coco.yaml
+      SOURCE_MANIFEST="$(params.source-manifest)"
+      COCO_OUTPUT="${SOURCE_MANIFEST%.yaml}-coco.yaml"
+      COCO_SERVICE_OUTPUT="${SOURCE_MANIFEST%.yaml}-sidecar-service.yaml"
+
+      if [ ! -f "$COCO_OUTPUT" ]; then
+        echo "Coco output file not found: $COCO_OUTPUT"
+        exit 1
+      fi
+      if [ ! -f "$COCO_SERVICE_OUTPUT" ]; then
+        echo "Coco service output file not found: $COCO_SERVICE_OUTPUT"
+        exit 1
+      fi
+
+      TARGET_DIR="$(params.target-manifest-dir)"
+      SOURCE_DIR=$(dirname "$SOURCE_MANIFEST")
+      SOURCE_BASENAME=$(basename "$SOURCE_MANIFEST")
+
+      # Empty target directory first
+      rm -rf "$TARGET_DIR"/*
+      # rm original deployment
+      rm -rf "$SOURCE_MANIFEST"
+      # rm generated info file for Trustee
+      rm -rf "$SOURCE_DIR"/*-trustee-secrets.yaml
+
+      mv $COCO_OUTPUT $SOURCE_MANIFEST
+      mv $COCO_SERVICE_OUTPUT "$SOURCE_DIR/service.yaml"
+
+      cp -r "$SOURCE_DIR"/* "$TARGET_DIR/"
+
+      echo "Target $TARGET_DIR contains:"
+      ls -la "$TARGET_DIR"
+
+      echo "Contents of $TARGET_DIR:"
+      for file in "$TARGET_DIR"/*.yaml; do
+        [ -f "$file" ] || continue
+        echo ""
+        echo "========== $file =========="
+        cat "$file"
+        echo "================================================"
+      done
+
+      # Git add, commit and push (same credentials as task-pull-repo / task-update-gitops)
+      echo "Setting up git and pushing changes..."
+      dnf install -y git > /dev/null 2>&1
+      git config --global user.name "CoCo Pipeline" || true
+      git config --global user.email "coco@openshift.local" || true
+
+      if [ -d "$(workspaces.ssh-directory.path)" ] && [ "$(ls -A $(workspaces.ssh-directory.path) 2>/dev/null)" ]; then
+        mkdir -p ~/.ssh
+        cp -R "$(workspaces.ssh-directory.path)"/* ~/.ssh/ 2>/dev/null || true
+        chmod 700 ~/.ssh
+        chmod 600 ~/.ssh/* 2>/dev/null || true
+        ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+      fi
+      if [ -f "$(workspaces.basic-auth.path)/.git-credentials" ]; then
+        mkdir -p ~/.git
+        cp "$(workspaces.basic-auth.path)/.git-credentials" ~/.git-credentials
+        if [ -f "$(workspaces.basic-auth.path)/.gitconfig" ]; then
+          cp "$(workspaces.basic-auth.path)/.gitconfig" ~/.gitconfig
+        fi
+        chmod 400 ~/.git-credentials
+        git config --global credential.helper store
+      fi
+      if [ ! -f ~/.git-credentials ] && ! { [ -d ~/.ssh ] && [ -n "$(ls -A ~/.ssh 2>/dev/null)" ]; }; then
+        echo "Error: No git credentials (ssh-directory or basic-auth) found"
+        exit 1
+      fi
+
+      git add -f $TARGET_DIR/*
+      git status
+      if git diff --staged --quiet; then
+        echo "No changes to commit."
+      else
+        git commit -m "coco-fy current deployment"
+        git push
+        echo "Pushed to origin"
+      fi
+      echo "Done."
+
+  workspaces:
+  - name: shared-ws
+    description: Shared workspace with cococtl, app repo, .kube/config, coco-config.toml, certs
+  - name: ssh-directory
+    optional: true
+    description: SSH keys for git auth (same as pull-repo / update-gitops)
+  - name: basic-auth
+    optional: true
+    description: .git-credentials and .gitconfig for HTTPS (same as pull-repo / update-gitops)

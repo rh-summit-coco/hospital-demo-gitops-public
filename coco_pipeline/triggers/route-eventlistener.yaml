@@ -1,0 +1,15 @@
+# Route for coco-github-listener. Point the GitOps repo webhook to this URL.
+apiVersion: route.openshift.io/v1
+kind: Route
+metadata:
+  name: coco-github-listener
+  namespace: janine-dev
+spec:
+  to:
+    kind: Service
+    name: el-coco-github-listener
+  port:
+    targetPort: http-listener
+  tls:
+    termination: edge
+    insecureEdgeTerminationPolicy: Redirect

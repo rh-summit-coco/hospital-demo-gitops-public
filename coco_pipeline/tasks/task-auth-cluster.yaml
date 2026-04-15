@@ -1,0 +1,56 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: auth-cluster
+  namespace: janine-dev
+spec:
+  description: |
+    Installs oc and authenticates into the cluster using in-cluster service account.
+  steps:
+  - name: install-oc-and-auth
+    image: registry.redhat.io/ubi9/ubi:latest
+    script: |
+      #!/bin/bash
+      set -e
+      echo "Installing oc..."
+      dnf install -y tar gzip
+      curl -sL "https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz" -o /tmp/oc.tar.gz
+      tar -C /usr/local/bin -xzf /tmp/oc.tar.gz
+      rm /tmp/oc.tar.gz
+      oc version --client
+
+      # Copy oc and kubectl into shared workspace so run-cococtl can use them
+      BIN_DIR="$(workspaces.shared-ws.path)/bin"
+      mkdir -p "$BIN_DIR"
+      cp /usr/local/bin/oc /usr/local/bin/kubectl "$BIN_DIR/"
+      chmod +x "$BIN_DIR"/oc "$BIN_DIR"/kubectl
+      echo "Installed oc and kubectl to $BIN_DIR"
+
+      echo "Configuring kubeconfig from in-cluster credentials..."
+      # When running inside the cluster, use service account token
+      MKCONFIG_DIR="$(workspaces.shared-ws.path)/.kube"
+      mkdir -p "$MKCONFIG_DIR"
+      KUBE_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+      KUBE_SERVER="https://${KUBERNETES_SERVICE_HOST}:${KUBERNETES_SERVICE_PORT}"
+      CA_CERT=/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+
+      kubectl config set-cluster in-cluster \
+        --server="$KUBE_SERVER" \
+        --certificate-authority="$CA_CERT" \
+        --embed-certs=true \
+        --kubeconfig="$MKCONFIG_DIR/config"
+      kubectl config set-credentials pipeline \
+        --token="$KUBE_TOKEN" \
+        --kubeconfig="$MKCONFIG_DIR/config"
+      kubectl config set-context default \
+        --cluster=in-cluster \
+        --user=pipeline \
+        --kubeconfig="$MKCONFIG_DIR/config"
+      kubectl config use-context default --kubeconfig="$MKCONFIG_DIR/config"
+
+      export KUBECONFIG="$MKCONFIG_DIR/config"
+      oc whoami
+      echo "Authenticated successfully."
+  workspaces:
+  - name: shared-ws
+    description: Workspace where .kube/config is written

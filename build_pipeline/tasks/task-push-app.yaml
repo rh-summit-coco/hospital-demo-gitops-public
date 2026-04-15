@@ -1,0 +1,221 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  annotations:
+    tekton.dev/categories: Image Build
+    tekton.dev/displayName: push app
+    tekton.dev/pipelines.minVersion: 0.17.0
+    tekton.dev/platforms: linux/amd64,linux/s390x,linux/ppc64le,linux/arm64
+    tekton.dev/tags: image-push
+  labels:
+    app.kubernetes.io/version: '0.1'
+  name: push-app
+  namespace: janine-dev
+spec:
+  env:
+  - name: CONTAINERS_STORAGE_CONF
+    value: $(workspaces.buildah-storage.path)/containers-storage.conf
+  description: 'Push container image to a container registry using buildah.
+
+    This task pulls from source registry and pushes to destination, returning the digest.'
+  results:
+  - description: Digest of the pushed image
+    name: IMAGE_DIGEST
+    type: string
+  - description: Digest of the sidecar/coco image (inspected via skopeo)
+    name: SIDECAR_IMAGE_DIGEST
+    type: string
+  - description: Digest of the beacon/attestation sidecar image (inspected via skopeo)
+    name: BEACON_SIDECAR_IMAGE_DIGEST
+    type: string
+  params:
+  - description: Source image reference to pull from (where buildah-redhat pushed it).
+    name: SOURCE_IMAGE
+    type: string
+  - description: Destination image reference to push to (e.g., quay.io/user/repo:tag).
+    name: DEST_IMAGE
+    type: string
+  - default: registry.redhat.io/rhel8/buildah:latest
+    description: The location of the buildah builder image.
+    name: BUILDER_IMAGE
+    type: string
+  - default: 'false'
+    description: Verify the TLS on the source registry endpoint
+    name: SOURCE_TLSVERIFY
+    type: string
+  - default: 'true'
+    description: Verify the TLS on the destination registry endpoint
+    name: DEST_TLSVERIFY
+    type: string
+  - default: ''
+    description: Sidecar/coco image reference to inspect for digest (used for cosign signing).
+    name: SIDECAR_IMAGE
+    type: string
+  - default: ''
+    description: Beacon/attestation sidecar image reference to inspect for digest (used for cosign signing).
+    name: BEACON_SIDECAR_IMAGE
+    type: string
+  steps:
+  - computeResources: {}
+    image: $(params.BUILDER_IMAGE)
+    name: push
+    script: |
+      #!/bin/bash
+      set -e
+
+      echo "📤 Pushing container image to Quay.io with buildah (digest-based)"
+      echo "=================================================="
+      echo "Source Image: $(params.SOURCE_IMAGE)"
+      echo "Destination Image: $(params.DEST_IMAGE)"
+      echo "Source TLS Verify: $(params.SOURCE_TLSVERIFY)"
+      echo "Destination TLS Verify: $(params.DEST_TLSVERIFY)"
+      echo ""
+
+      ls -la $(workspaces.buildah-storage.path)
+      echo ""
+
+      # Configure buildah to use workspace for storage (same as build-container task)
+      if [ -n "$BUILDAH_STORAGE_PATH" ]; then
+        mkdir -p "$BUILDAH_STORAGE_PATH"
+        echo "🔧 Configuring buildah to use shared workspace storage"
+        echo "[storage]
+        driver = \"overlay\"
+        graphroot = \"$BUILDAH_STORAGE_PATH\"
+        runroot = \"/tmp/containers/run\"
+        " > "$BUILDAH_STORAGE_PATH/containers-storage.conf"
+        export CONTAINERS_STORAGE_CONF="$BUILDAH_STORAGE_PATH/containers-storage.conf"
+        echo "   Storage root: $BUILDAH_STORAGE_PATH"
+        echo "   Config file created: $BUILDAH_STORAGE_PATH/containers-storage.conf"
+      else
+        echo "⚠️  Warning: buildah-storage workspace path is empty or not set"
+      fi
+
+      ls -la $(workspaces.buildah-storage.path)
+      echo ""
+
+      # Setup docker config for destination registry authentication
+      if [ -f "$(workspaces.dockerconfig.path)/config.json" ]; then
+        echo "🔐 Setting up docker config for registry authentication"
+        mkdir -p ~/.docker
+        cp "$(workspaces.dockerconfig.path)/config.json" ~/.docker/config.json
+        export DOCKER_CONFIG=~/.docker
+        echo "✓ Docker config copied to ~/.docker/config.json"
+      elif [ -f "$(workspaces.dockerconfig.path)/.dockerconfigjson" ]; then
+        echo "🔐 Setting up docker config for registry authentication"
+        mkdir -p ~/.docker
+        cp "$(workspaces.dockerconfig.path)/.dockerconfigjson" ~/.docker/config.json
+        export DOCKER_CONFIG=~/.docker
+        echo "✓ Docker config copied to ~/.docker/config.json"
+      fi
+
+      # buildah images --root $(workspaces.buildah-storage.path)
+
+      # Check if image is already in shared storage
+      if [ -d "$(workspaces.buildah-storage.path)" ] && buildah images --root $(workspaces.buildah-storage.path) $(params.SOURCE_IMAGE) 2>/dev/null | grep -q $(params.SOURCE_IMAGE); then
+        echo "✅ Image found in shared buildah storage (from build-container task)"
+      else
+        # Get service account token for internal registry
+        SA_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token 2>/dev/null || echo "")
+
+        echo "📥 Pulling source image from internal registry..."
+        if [ -n "$SA_TOKEN" ] && [[ "$(params.SOURCE_IMAGE)" == *"image-registry.openshift-image-registry"* ]]; then
+          echo "Using ServiceAccount token for source registry"
+          buildah pull --root $(workspaces.buildah-storage.path) --tls-verify=$(params.SOURCE_TLSVERIFY) --creds="serviceaccount:$SA_TOKEN" $(params.SOURCE_IMAGE)
+        else
+          buildah pull --root $(workspaces.buildah-storage.path) --tls-verify=$(params.SOURCE_TLSVERIFY) $(params.SOURCE_IMAGE)
+        fi
+      fi
+
+      echo ""
+      echo "📤 Pushing to destination registry using digest reference..."
+      echo "   Destination: $(params.DEST_IMAGE)"
+
+      # Push using digest reference (no tag) and capture output
+      set +e  # Temporarily disable exit on error to capture output
+      PUSH_OUTPUT=$(buildah push --root $(workspaces.buildah-storage.path) \
+        --tls-verify=$(params.DEST_TLSVERIFY) \
+        $(params.SOURCE_IMAGE) \
+        docker://$(params.DEST_IMAGE) 2>&1)
+      PUSH_EXIT_CODE=$?
+      set -e  # Re-enable exit on error
+
+      echo "$PUSH_OUTPUT"
+
+      if [ $PUSH_EXIT_CODE -ne 0 ]; then
+        echo "❌ Error: Failed to push image to destination registry (exit code: $PUSH_EXIT_CODE)"
+        exit 1
+      fi
+
+      echo ""
+      echo "✅ Container image pushed successfully using digest reference"
+      echo "🎯 Destination: $(params.DEST_IMAGE)"
+
+      # Get digest from source image BEFORE pushing
+      echo ""
+      echo "🔍 Getting image digest from source image..."
+
+      dnf install -y skopeo jq > /dev/null 2>&1
+
+      set +e  # Temporarily disable exit on error to capture output
+      IMAGE_DIGEST=$(skopeo inspect docker://$(params.DEST_IMAGE) | jq -r .Digest)
+      set -e  # Re-enable exit on error
+
+      echo "IMAGE_DIGEST: $IMAGE_DIGEST"
+
+      # Verify the digest format and save
+      if [[ "$IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+        echo "📋 Image digest: $IMAGE_DIGEST"
+        echo "$IMAGE_DIGEST" > $(results.IMAGE_DIGEST.path)
+        echo "✅ Digest saved to results"
+        echo "✅ Image pushed directly using digest (no tag)"
+      else
+        echo "❌ Error: Invalid digest format: $IMAGE_DIGEST"
+        exit 1
+      fi
+
+      # Also compute digest of sidecar/coco image (same registry, for cosign signing)
+      echo ""
+      echo "🔍 Getting digest of $(params.SIDECAR_IMAGE)..."
+      set +e
+      SIDECAR_IMAGE_DIGEST=$(skopeo inspect docker://$(params.SIDECAR_IMAGE) | jq -r .Digest)
+      set -e
+      echo "SIDECAR_IMAGE_DIGEST: $SIDECAR_IMAGE_DIGEST"
+      if [[ "$SIDECAR_IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+        echo "📋 CoCo secure access sidecar image digest: $SIDECAR_IMAGE_DIGEST"
+        echo "$SIDECAR_IMAGE_DIGEST" > $(results.SIDECAR_IMAGE_DIGEST.path)
+        echo "✅ CoCo secure access sidecar image digest saved to results"
+      else
+        echo "❌ Error: Invalid digest format for CoCo secure access sidecar image: $SIDECAR_IMAGE_DIGEST"
+        exit 1
+      fi
+
+      # Also compute digest of beacon/attestation sidecar image (for cosign signing)
+      if [ -n "$(params.BEACON_SIDECAR_IMAGE)" ]; then
+        echo ""
+        echo "🔍 Getting digest of $(params.BEACON_SIDECAR_IMAGE)..."
+        set +e
+        BEACON_SIDECAR_IMAGE_DIGEST=$(skopeo inspect docker://$(params.BEACON_SIDECAR_IMAGE) | jq -r .Digest)
+        set -e
+        echo "BEACON_SIDECAR_IMAGE_DIGEST: $BEACON_SIDECAR_IMAGE_DIGEST"
+        if [[ "$BEACON_SIDECAR_IMAGE_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]; then
+          echo "📋 Beacon sidecar image digest: $BEACON_SIDECAR_IMAGE_DIGEST"
+          echo "$BEACON_SIDECAR_IMAGE_DIGEST" > $(results.BEACON_SIDECAR_IMAGE_DIGEST.path)
+          echo "✅ Beacon sidecar image digest saved to results"
+        else
+          echo "❌ Error: Invalid digest format for beacon sidecar image: $BEACON_SIDECAR_IMAGE_DIGEST"
+          exit 1
+        fi
+      fi
+    securityContext:
+      privileged: true
+  workspaces:
+  - name: buildah-storage
+    description: Shared workspace for buildah storage
+  - name: sslcertdir
+    optional: true
+  - description: An optional workspace that allows providing a .docker/config.json
+      file for Buildah to access the container registry. The file should be placed
+      at the root of the Workspace with name config.json.
+    name: dockerconfig
+    optional: true
+

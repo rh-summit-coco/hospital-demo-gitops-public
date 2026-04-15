@@ -1,0 +1,121 @@
+---
+# Deploy Kubernetes YAML to VMs using podman kube play
+
+- name: Prepare inventory from VM list
+  hosts: localhost
+  gather_facts: false
+  vars:
+    vm_list: "{{ lookup('env', 'VM_LIST') | from_json }}"
+    ssh_private_key_path: "/tmp/ssh-key/id_rsa"
+
+  tasks:
+    - name: Add VMs to inventory
+      ansible.builtin.add_host:
+        name: "{{ item.ip }}"
+        ansible_host: "{{ item.ip }}"
+        ansible_user: "{{ item.user }}"
+        ansible_ssh_private_key_file: "{{ ssh_private_key_path }}"
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        groups: deployed_vms
+      loop: "{{ vm_list }}"
+
+- name: Deploy workload with podman kube play
+  hosts: deployed_vms
+  gather_facts: true
+  become: true
+  become_method: sudo
+  vars:
+    deployment_yaml_path: "{{ lookup('env', 'DEPLOYMENT_YAML_PATH') }}"
+    secret_yaml_path: "{{ lookup('env', 'SECRET_YAML_PATH') }}"
+    deployment_patch_script_path: "{{ lookup('env', 'DEPLOYMENT_PATCH_SCRIPT_PATH') }}"
+    remote_yaml_path: "/tmp/deployment.yaml"
+    remote_secret_path: "/tmp/secret.yaml"
+    remote_deployment_patch_script_path: "/tmp/deployment-patch.sh"
+
+  tasks:
+    - name: Copy deployment YAML to VM
+      ansible.builtin.copy:
+        src: "{{ item.src }}"
+        dest: "{{ item.dest }}"
+        mode: "0644"
+      loop:
+        - { src: "{{ deployment_yaml_path }}", dest: "{{ remote_yaml_path }}" }
+        - { src: "{{ secret_yaml_path }}", dest: "{{ remote_secret_path }}" }
+        - { src: "{{ deployment_patch_script_path }}", dest: "{{ remote_deployment_patch_script_path }}" }
+
+    # - name: Open port 8443 in firewalld
+    #   ansible.builtin.firewalld:
+    #     port: "8443/tcp"
+    #     permanent: true
+    #     state: enabled
+    #   register: open_port_8443_result
+    #   ignore_errors: true
+    #
+    # - name: Reload firewalld to apply port change
+    #   ansible.builtin.command:
+    #     cmd: firewall-cmd --reload
+    #   when: open_port_8443_result is changed | default(false)
+    #   ignore_errors: true
+
+    - name: Disable firewalld (due to bug RHEL-134878)
+      ansible.builtin.service:
+        name: firewalld
+        state: stopped
+        enabled: false
+      ignore_errors: true
+
+    - name: Patch deployment and secret YAMLs (with VM-side log for fetch)
+      block:
+        - name: Patch deployment and secret YAMLs
+          ansible.builtin.shell: |
+            set -euo pipefail
+            set -o pipefail
+            bash "{{ remote_deployment_patch_script_path }}" "{{ remote_yaml_path }}" "{{ remote_secret_path }}" 2>&1 | tee /tmp/deployment-patch.log
+          args:
+            executable: /bin/bash
+
+      always:
+        - name: Ensure fetch log directory exists on Ansible controller
+          ansible.builtin.file:
+            path: "{{ playbook_dir }}/fetch-logs"
+            state: directory
+            mode: "0755"
+          delegate_to: localhost
+          become: false
+          run_once: true
+
+        - name: Fetch patch debug log from VM
+          ansible.builtin.fetch:
+            src: /tmp/deployment-patch.log
+            dest: "{{ playbook_dir }}/fetch-logs/{{ inventory_hostname }}-deployment-patch.log"
+            flat: true
+          ignore_errors: true
+
+    - name: Create secrets for podman kube play
+      ansible.builtin.command:
+        cmd: podman kube play {{ remote_secret_path }}
+
+    - name: Run deployment with podman kube play
+      ansible.builtin.command:
+        cmd: podman kube play --replace {{ remote_yaml_path }}
+      register: kube_play_result
+
+    - name: Remove temporary files from VM
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "{{ remote_secret_path }}"
+        - "{{ remote_deployment_patch_script_path }}"
+        - /tmp/deployment-patch.log
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "✅ Workload deployed with podman kube play!"
+          - "VM: {{ inventory_hostname }}"
+          - "YAML: {{ remote_yaml_path }}"
+          - "============================================"
+      delegate_to: localhost
+      become: false

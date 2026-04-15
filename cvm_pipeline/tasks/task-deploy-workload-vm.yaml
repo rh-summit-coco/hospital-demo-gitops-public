@@ -1,0 +1,65 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  annotations:
+    tekton.dev/categories: Infrastructure
+    tekton.dev/displayName: Deploy Workload to VM
+    tekton.dev/pipelines.minVersion: 0.17.0
+    tekton.dev/platforms: linux/amd64
+    tekton.dev/tags: ansible,vm,workload,deployment
+  labels:
+    app.kubernetes.io/version: '0.1'
+  name: deploy-workload-vm
+  namespace: janine-dev
+spec:
+  description: 'Deploys Kubernetes YAML to configured VMs using podman kube play.'
+  params:
+  - description: List of VMs to deploy workload to
+    name: VM_LIST
+    type: string
+  - description: Path to deployment YAML in repository
+    name: DEPLOYMENT_YAML_PATH
+    type: string
+    default: "application/deid-roberta/manifests/deployment.yaml"
+  - description: Path to secret YAML in repository
+    name: SECRET_YAML_PATH
+    type: string
+    default: "application/deid-roberta/manifests/deployment-sealed-secrets.yaml"
+  - description: Sidecar companion script in repository
+    name: DEPLOYMENT_PATCH_SCRIPT_PATH
+    type: string
+    default: "cvm_pipeline/ansible/deployment-patch.sh"
+  - description: Ansible container image
+    name: ANSIBLE_IMAGE
+    type: string
+    default: "image-registry.openshift-image-registry.svc:5000/janine-dev/cvm-ansible:latest"
+  workspaces:
+  - name: source
+    description: Workspace for source code
+  - name: ssh-key
+    description: SSH key for VM access
+    mountPath: /etc/ssh-key
+    readOnly: true
+  steps:
+  - name: cvm-deploy-workload-vm
+    image: $(params.ANSIBLE_IMAGE)
+    env:
+    - name: VM_LIST
+      value: $(params.VM_LIST)
+    - name: DEPLOYMENT_YAML_PATH
+      value: "$(workspaces.source.path)/$(params.DEPLOYMENT_YAML_PATH)"
+    - name: SECRET_YAML_PATH
+      value: "$(workspaces.source.path)/$(params.SECRET_YAML_PATH)"
+    - name: DEPLOYMENT_PATCH_SCRIPT_PATH
+      value: "$(workspaces.source.path)/$(params.DEPLOYMENT_PATCH_SCRIPT_PATH)"
+    script: |
+      #!/bin/bash
+      set -e
+      mkdir -p /tmp/ssh-key
+      cp /etc/ssh-key/id_rsa /tmp/ssh-key/id_rsa
+      cp /etc/ssh-key/id_rsa.pub /tmp/ssh-key/id_rsa.pub
+      chmod 600 /tmp/ssh-key/id_rsa
+      chmod 644 /tmp/ssh-key/id_rsa.pub
+      echo "=== Running workload deployment playbook ==="
+      ansible-playbook "$(workspaces.source.path)/cvm_pipeline/ansible/deploy-k8s-to-podman.yml" -vvv

@@ -1,0 +1,23 @@
+---
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  generateName: cvm-pipeline-run-
+  namespace: janine-dev
+spec:
+  taskRunTemplate:
+    serviceAccountName: pipeline
+  pipelineRef:
+    name: cvm-pipeline
+  workspaces:
+    - name: azure-ssh-key
+      secret:
+        secretName: azure-ssh-key
+    - name: source
+      volumeClaimTemplate:
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 1Gi

@@ -1,0 +1,48 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: build-push-sign-auto
+  namespace: janine-dev
+spec:
+  serviceAccountName: pipeline
+  pipelineRef:
+    name: build-push-sign
+  params:
+  - name: git-url
+    value: https://github.com/confidential-devhub/deid_roberta.git
+  - name: git-revision
+    value: prod
+  - name: dest-repo
+    value: quay.io/confidential-devhub
+  - name: image-name
+    value: hospital-janine-app
+  - name: image-tag
+    value: latest
+  workspaces:
+  - name: source-ws
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+  - name: dockerconfig-ws
+    secret:
+      secretName: pipeline-dockerconfigjson
+  - name: cosign-key-ws
+    secret:
+      secretName: cosign-key
+  - name: buildah-storage-ws
+    emptyDir: {}
+  - name: gitops-ws
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 1Gi
+  - name: git-credentials-ws
+    secret:
+      secretName: gitops-git-credentials

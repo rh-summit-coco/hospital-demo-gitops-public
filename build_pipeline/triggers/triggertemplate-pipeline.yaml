@@ -1,0 +1,96 @@
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: build-push-sign-template
+  namespace: janine-dev
+spec:
+  params:
+    - name: git-url
+      description: Git repository URL
+    - name: git-revision
+      description: Git revision (commit SHA)
+    - name: git-branch
+      description: Git branch name
+    - name: image-tag
+      description: Image tag (typically commit SHA)
+    - name: image-name
+      description: Container image name
+    - name: dest-repo
+      description: Destination registry
+    - name: dockerfile-path
+      description: Path to Dockerfile
+    - name: repo-name
+      description: Repository name
+    - name: commit-message
+      description: Commit message
+    - name: gitops-repo-url
+      description: GitOps repository URL to update with image digest
+      default: https://github.com/rh-summit-coco/hospital-demo-gitops.git
+    - name: gitops-branch
+      description: Git branch in GitOps repository to update
+      default: prod
+    - name: deployment-path
+      description: Path to deployment.yaml file in GitOps repository
+      default: application/deid-roberta/templates/deployment.yaml
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: build-push-sign-
+        labels:
+          triggers.tekton.dev/eventlistener: github-listener
+          triggers.tekton.dev/trigger: github-push-trigger
+          triggers.tekton.dev/triggerbinding: github-push-binding
+          triggers.tekton.dev/triggertemplate: build-push-sign-template
+      spec:
+        serviceAccountName: pipeline
+        pipelineRef:
+          name: build-push-sign
+        params:
+          - name: git-url
+            value: $(tt.params.git-url)
+          - name: git-revision
+            value: $(tt.params.git-revision)
+          - name: image-tag
+            value: $(tt.params.image-tag)
+          - name: image-name
+            value: $(tt.params.image-name)
+          - name: dest-repo
+            value: $(tt.params.dest-repo)
+          - name: dockerfile-path
+            value: $(tt.params.dockerfile-path)
+          - name: gitops-repo-url
+            value: $(tt.params.gitops-repo-url)
+          - name: gitops-branch
+            value: $(tt.params.gitops-branch)
+          - name: deployment-path
+            value: $(tt.params.deployment-path)
+        workspaces:
+          - name: source-ws
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi
+          - name: dockerconfig-ws
+            secret:
+              secretName: pipeline-dockerconfigjson
+          - name: cosign-key-ws
+            secret:
+              secretName: cosign-key
+          - name: buildah-storage-ws
+            emptyDir: {}
+          - name: gitops-ws
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi
+          - name: git-credentials-ws
+            secret:
+              secretName: gitops-git-credentials
+

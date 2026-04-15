@@ -1,0 +1,70 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  name: pull-repo
+  namespace: janine-dev
+spec:
+  description: |
+    Clones a repository requiring authentication (same secret pattern as update-gitops).
+  params:
+  - name: repo-url
+    type: string
+    description: Repository URL to clone
+  - name: branch
+    type: string
+    default: main
+    description: Branch to checkout
+  - name: subdirectory
+    type: string
+    default: app-repo
+    description: Subdirectory in workspace to clone into
+  steps:
+  - name: clone
+    image: registry.redhat.io/ubi9/ubi:latest
+    script: |
+      #!/bin/bash
+      set -e
+      echo "Cloning repository $(params.repo-url) branch $(params.branch)..."
+
+      dnf install -y git > /dev/null 2>&1
+      git config --global user.name "CoCo Pipeline" || true
+      git config --global user.email "coco@openshift.local" || true
+
+      # Setup authentication (same as task-update-gitops)
+      if [ -d "$(workspaces.ssh-directory.path)" ] && [ "$(ls -A $(workspaces.ssh-directory.path) 2>/dev/null)" ]; then
+        echo "Setting up SSH authentication..."
+        mkdir -p ~/.ssh
+        cp -R "$(workspaces.ssh-directory.path)"/* ~/.ssh/ 2>/dev/null || true
+        chmod 700 ~/.ssh
+        chmod 600 ~/.ssh/* 2>/dev/null || true
+        ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null || true
+      fi
+      if [ -f "$(workspaces.basic-auth.path)/.git-credentials" ]; then
+        echo "Setting up basic authentication..."
+        mkdir -p ~/.git
+        cp "$(workspaces.basic-auth.path)/.git-credentials" ~/.git-credentials
+        if [ -f "$(workspaces.basic-auth.path)/.gitconfig" ]; then
+          cp "$(workspaces.basic-auth.path)/.gitconfig" ~/.gitconfig
+        fi
+        chmod 400 ~/.git-credentials
+        git config --global credential.helper store
+      else
+        echo "Error: No authentication credentials found"
+        exit 1
+      fi
+
+      WORKSPACE=$(workspaces.shared-ws.path)
+      REPO_DIR="$WORKSPACE/$(params.subdirectory)"
+      rm -rf "$REPO_DIR"
+      git clone --branch "$(params.branch)" --depth 1 "$(params.repo-url)" "$REPO_DIR"
+      echo "Cloned to $REPO_DIR"
+      ls -la "$REPO_DIR"
+  workspaces:
+  - name: shared-ws
+    description: Workspace where repo is cloned (subdirectory)
+  - name: ssh-directory
+    optional: true
+    description: SSH keys for git auth (same as update-gitops)
+  - name: basic-auth
+    optional: true
+    description: .git-credentials and .gitconfig for HTTPS (same as update-gitops)

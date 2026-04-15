@@ -1,0 +1,34 @@
+# RBAC so the coco EventListener can create PipelineRuns (and PVCs) when a webhook fires.
+# The EventListener uses serviceAccountName: pipeline; Tekton Triggers uses that SA to
+# create the resources from the TriggerTemplate. Without these bindings, the webhook
+# may return 202 but no PipelineRun is created.
+#
+# If the build pipeline EventListener already uses the same pipeline SA in janine-dev,
+# you may already have equivalent bindings; applying this is idempotent.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: coco-eventlistener-pipeline-binding
+  namespace: janine-dev
+subjects:
+  - kind: ServiceAccount
+    name: pipeline
+    namespace: janine-dev
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tekton-triggers-eventlistener-roles
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: coco-eventlistener-pipeline-clusterbinding
+subjects:
+  - kind: ServiceAccount
+    name: pipeline
+    namespace: janine-dev
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: tekton-triggers-eventlistener-clusterroles

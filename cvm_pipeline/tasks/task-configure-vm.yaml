@@ -1,0 +1,107 @@
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  annotations:
+    tekton.dev/categories: Infrastructure
+    tekton.dev/displayName: Configure VM with trustee_attestation_client
+    tekton.dev/pipelines.minVersion: 0.17.0
+    tekton.dev/platforms: linux/amd64
+    tekton.dev/tags: ansible,vm,configuration
+  labels:
+    app.kubernetes.io/version: '0.1'
+  name: configure-vm
+  namespace: janine-dev
+spec:
+  description: 'Configures Cloud VMs with Trustee Guest Components using the trustee_attestation_client Ansible role.'
+  params:
+  - description: List of VMs to configure
+    name: VM_LIST
+    type: string
+  - description: GitHub repository URL for Trustee Guest Components quadlet files
+    name: CVM_SYSTEM_ROLE_REPO_URL
+    type: string
+    default: "https://github.com/litian1992/trustee_client"
+  - description: Branch or tag to use from the repository
+    name: CVM_SYSTEM_ROLE_REPO_BRANCH
+    type: string
+    default: "main"
+  - description: Enable disk encryption
+    name: CVM_DEPLOY_ENCRYPT_DISK
+    type: string
+    default: "true"
+  - description: Mount point for encrypted disk (if encryption enabled)
+    name: CVM_DEPLOY_ENCRYPTED_DISK_MOUNT_POINT
+    type: string
+    default: "/mnt/encrypted"
+  - description: Ansible container image
+    name: ANSIBLE_IMAGE
+    type: string
+    default: "image-registry.openshift-image-registry.svc:5000/janine-dev/cvm-ansible:latest"
+  - description: Git repository URL containing Ansible playbooks
+    name: GIT_URL
+    type: string
+    default: "github.com/rh-summit-coco/hospital-demo-gitops.git"
+  - description: Branch or revision for playbooks repository
+    name: GIT_BRANCH
+    type: string
+    default: "prod"
+  workspaces:
+    - name: source
+      description: Workspace for source code
+    - name: ssh-key
+      description: SSH key for VM access
+      mountPath: /etc/ssh-key
+      readOnly: true
+  steps:
+  - name: fetch-source
+    image: registry.redhat.io/openshift-pipelines/pipelines-git-init-rhel9:v1.21.0
+    env:
+    - name: GIT_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: litian-git-credential
+          key: username
+    - name: GIT_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: litian-git-credential
+          key: password
+    script: |
+      /ko-app/git-init \
+        -url=https://${GIT_USERNAME}:${GIT_PASSWORD}@$(params.GIT_URL) \
+        -revision=$(params.GIT_BRANCH) \
+        -path=$(workspaces.source.path)
+
+  - name: configure-vm
+    image: $(params.ANSIBLE_IMAGE)
+    env:
+    - name: CVM_DEPLOY_TRUSTEE_KBS_URL
+      valueFrom:
+        secretKeyRef:
+          name: trustee-kbs
+          key: kbs-url
+    - name: CVM_DEPLOY_TRUSTEE_KBS_CERT
+      valueFrom:
+        secretKeyRef:
+          name: trustee-kbs
+          key: kbs-cert.pem
+    - name: CVM_SYSTEM_ROLE_REPO_URL
+      value: $(params.CVM_SYSTEM_ROLE_REPO_URL)
+    - name: CVM_SYSTEM_ROLE_REPO_BRANCH
+      value: $(params.CVM_SYSTEM_ROLE_REPO_BRANCH)
+    - name: CVM_DEPLOY_ENCRYPT_DISK
+      value: $(params.CVM_DEPLOY_ENCRYPT_DISK)
+    - name: CVM_DEPLOY_ENCRYPTED_DISK_MOUNT_POINT
+      value: $(params.CVM_DEPLOY_ENCRYPTED_DISK_MOUNT_POINT)
+    - name: VM_LIST
+      value: $(params.VM_LIST)
+    script: |
+      #!/bin/bash
+      set -e
+      mkdir -p /tmp/ssh-key
+      cp /etc/ssh-key/id_rsa /tmp/ssh-key/id_rsa
+      cp /etc/ssh-key/id_rsa.pub /tmp/ssh-key/id_rsa.pub
+      chmod 600 /tmp/ssh-key/id_rsa
+      chmod 644 /tmp/ssh-key/id_rsa.pub
+      echo "=== Running Ansible playbook ==="
+      ansible-playbook "$(workspaces.source.path)/cvm_pipeline/ansible/vm-configure.yml" -v

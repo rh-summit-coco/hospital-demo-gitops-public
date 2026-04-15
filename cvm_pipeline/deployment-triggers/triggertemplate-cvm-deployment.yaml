@@ -1,0 +1,41 @@
+---
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: cvm-deployment-pipeline-template
+  namespace: janine-dev
+spec:
+  params:
+    - name: git-url
+      description: Git repository URL
+    - name: git-branch
+      description: Git branch name
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: cvm-deployment-run-
+        namespace: janine-dev
+        labels:
+          triggers.tekton.dev/eventlistener: cvm-deployment-listener
+          triggers.tekton.dev/trigger: cvm-deployment-push-trigger
+          triggers.tekton.dev/triggerbinding: cvm-deployment-github-binding
+          triggers.tekton.dev/triggertemplate: cvm-deployment-pipeline-template
+          app.kubernetes.io/name: cvm-deployment-pipeline
+      spec:
+        taskRunTemplate:
+          serviceAccountName: pipeline
+        pipelineRef:
+          name: cvm-pipeline
+        workspaces:
+          - name: azure-ssh-key
+            secret:
+              secretName: azure-ssh-key
+          - name: source
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi

@@ -1,0 +1,29 @@
+apiVersion: confidentialcontainers.org/v1alpha1
+kind: KbsConfig
+metadata:
+  name: trusteeconfig-kbs-config
+  namespace: trustee-operator-system
+spec:
+  tdxConfigSpec:
+    kbsTdxConfigMapName: trusteeconfig-tdx-config
+  kbsAttestationKeySecretName: trusteeconfig-attestation-key-secret
+  kbsResourcePolicyConfigMapName: trusteeconfig-resource-policy
+  kbsConfigMapName: trusteeconfig-kbs-config
+  kbsHttpsKeySecretName: trusteeconfig-https-key-secret
+  kbsHttpsCertSecretName: trusteeconfig-https-cert-secret
+  kbsRvpsRefValuesConfigMapName: trusteeconfig-rvps-reference-values
+  kbsAttestationCertSecretName: trusteeconfig-attestation-cert-secret
+  kbsServiceType: ClusterIP
+  kbsSecretResources:
+    - trustee-image-policy
+    - cosign-key
+    - sidecar-tls
+    - sidecar-tls-deid-roberta
+    - attestation-status
+    - azure
+    - attestation-collector-certs
+  kbsDeploymentType: AllInOneDeployment
+  KbsDeploymentSpec:
+    replicas: 1
+  kbsAttestationPolicyConfigMapName: trusteeconfig-attestation-policy
+  kbsAuthSecretName: trusteeconfig-auth-secret

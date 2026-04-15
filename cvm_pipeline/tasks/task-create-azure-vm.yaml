@@ -1,0 +1,124 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  annotations:
+    tekton.dev/categories: Infrastructure
+    tekton.dev/displayName: Create Azure VM
+    tekton.dev/pipelines.minVersion: 0.17.0
+    tekton.dev/platforms: linux/amd64
+    tekton.dev/tags: azure,vm,infrastructure
+  labels:
+    app.kubernetes.io/version: '0.1'
+  name: create-azure-vm
+  namespace: janine-dev
+spec:
+  description: 'Creates an Azure Confidential VM using Azure CLI.'
+  params:
+  - description: Azure resource group name
+    name: RESOURCE_GROUP
+    type: string
+    default: "nodejs-ex-vm-rg"
+  - description: Azure VM name
+    name: VM_NAME
+    type: string
+    default: "deid-roberta-azure-vm"
+  - description: Azure VM image reference
+    name: VM_IMAGE
+    type: string
+    default: "RedHat:rhel-cvm:10_1_cvm:latest"
+  - description: Azure VM size
+    name: VM_SIZE
+    type: string
+    default: "Standard_DC2as_v5"
+  - description: Azure location/region
+    name: LOCATION
+    type: string
+    default: "eastus"
+  - description: Azure data disk size
+    name: DATA_DISK_SIZE
+    type: string
+    default: "10"
+  results:
+  - description: Public IP address of the created VM
+    name: VM_IP
+    type: string
+  steps:
+  - name: create-vm
+    image: mcr.microsoft.com/azure-cli:latest
+    env:
+    - name: AZURE_CLIENT_ID
+      valueFrom:
+        secretKeyRef:
+          name: azure-credentials
+          key: AZURE_CLIENT_ID
+    - name: AZURE_CLIENT_SECRET
+      valueFrom:
+        secretKeyRef:
+          name: azure-credentials
+          key: AZURE_CLIENT_SECRET
+    - name: AZURE_TENANT_ID
+      valueFrom:
+        secretKeyRef:
+          name: azure-credentials
+          key: AZURE_TENANT_ID
+    - name: AZURE_SUBSCRIPTION_ID
+      valueFrom:
+        secretKeyRef:
+          name: azure-credentials
+          key: AZURE_SUBSCRIPTION_ID
+    - name: SSH_PUB_KEY
+      valueFrom:
+        secretKeyRef:
+          name: azure-ssh-key
+          key: id_rsa.pub
+    script: |
+      #!/bin/bash
+      set -e
+      
+      echo "=== Logging in to Azure ==="
+      az login --service-principal \
+        -u "$AZURE_CLIENT_ID" \
+        -p "$AZURE_CLIENT_SECRET" \
+        --tenant "$AZURE_TENANT_ID" > /dev/null 2>&1
+      az account set --subscription "$AZURE_SUBSCRIPTION_ID" > /dev/null 2>&1
+      
+      if ! az group show --name "$(params.RESOURCE_GROUP)" &>/dev/null; then
+        az group create --name "$(params.RESOURCE_GROUP)" --location "$(params.LOCATION)"
+      fi
+      
+      echo "=== Checking if VM exists ==="
+      if ! az vm show --resource-group "$(params.RESOURCE_GROUP)" --name "$(params.VM_NAME)" --query "id" -o tsv &>/dev/null; then
+        echo "=== Creating Azure VM ==="
+        az vm create \
+          --resource-group "$(params.RESOURCE_GROUP)" \
+          --name "$(params.VM_NAME)" \
+          --image "$(params.VM_IMAGE)" \
+          --size "$(params.VM_SIZE)" \
+          --admin-username azureuser \
+          --ssh-key-values "$SSH_PUB_KEY" \
+          --public-ip-sku Standard \
+          --security-type ConfidentialVM \
+          --enable-vtpm --enable-secure-boot \
+          --os-disk-security-encryption-type DiskWithVMGuestState \
+          --data-disk-sizes-gb "$(params.DATA_DISK_SIZE)"
+        az vm open-port --resource-group "$(params.RESOURCE_GROUP)" --name "$(params.VM_NAME)" --port 8080 --priority 1001
+        az vm open-port --resource-group "$(params.RESOURCE_GROUP)" --name "$(params.VM_NAME)" --port 8443 --priority 1002
+
+        echo "=== Waiting for VM to be provisioned ==="
+        sleep 30
+      else
+        echo "VM already exists"
+      fi
+      
+      echo "=== Getting VM public IP ==="
+      VM_IP=$(az vm show -d --resource-group "$(params.RESOURCE_GROUP)" --name "$(params.VM_NAME)" --query publicIps -o tsv)
+      echo "VM IP: $VM_IP"
+      
+      # Save VM IP to result
+      printf "%s" "$VM_IP" > $(results.VM_IP.path)
+      
+      echo "============================================"
+      echo "✅ Azure VM deployed successfully!"
+      echo "VM IP: $VM_IP"
+      echo "============================================"

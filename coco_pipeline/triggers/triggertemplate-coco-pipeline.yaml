@@ -1,0 +1,55 @@
+# TriggerTemplate that creates a PipelineRun for coco-pipeline when GitHub push (Tekton-authored) is received.
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerTemplate
+metadata:
+  name: coco-pipeline-from-github-template
+  namespace: janine-dev
+spec:
+  params:
+    - name: app-repo-url
+      description: GitOps/App repository URL for coco
+    - name: app-repo-branch
+      description: Git branch name (e.g. main, from overlay)
+    - name: source-manifest
+      description: Source manifest path in app repo
+    - name: target-manifest-dir
+      description: Target manifest directory in app repo
+    - name: repo-name
+      description: Repository name (for labeling)
+    - name: commit-sha
+      description: Commit SHA (for labeling)
+  resourcetemplates:
+    - apiVersion: tekton.dev/v1
+      kind: PipelineRun
+      metadata:
+        generateName: coco-from-github-
+        namespace: janine-dev
+        labels:
+          triggers.tekton.dev/eventlistener: coco-github-listener
+          triggers.tekton.dev/trigger: coco-github-push-trigger
+          tekton.dev/triggered-by-github: "true"
+      spec:
+        serviceAccountName: pipeline
+        pipelineRef:
+          name: coco-pipeline
+        params:
+          - name: app-repo-url
+            value: $(tt.params.app-repo-url)
+          - name: app-repo-branch
+            value: $(tt.params.app-repo-branch)
+          - name: source-manifest
+            value: $(tt.params.source-manifest)
+          - name: target-manifest-dir
+            value: $(tt.params.target-manifest-dir)
+        workspaces:
+          - name: shared-ws
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 5Gi
+          - name: git-credentials-ws
+            secret:
+              secretName: gitops-git-credentials

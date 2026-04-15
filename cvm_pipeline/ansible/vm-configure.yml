@@ -1,0 +1,62 @@
+---
+# Ansible playbook to configure Cloud VMs with trustee_attestation_client role
+- name: Wait for VMs and prepare inventory
+  hosts: localhost
+  gather_facts: false
+  vars:
+    vm_list: "{{ lookup('env', 'VM_LIST') | from_json }}"
+    ssh_private_key_path: "/tmp/ssh-key/id_rsa"
+
+  tasks:
+    - name: Wait for VMs to be ready (SSH)
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: 22
+        timeout: 600
+      loop: "{{ vm_list }}"
+
+    - name: Add VMs to inventory
+      ansible.builtin.add_host:
+        name: "{{ item.ip }}"
+        ansible_host: "{{ item.ip }}"
+        ansible_user: "{{ item.user}}"
+        ansible_ssh_private_key_file: "{{ ssh_private_key_path }}"
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        groups: deployed_vms
+      loop: "{{ vm_list }}"
+
+- name: Configure VM with trustee_client role
+  hosts: deployed_vms
+  gather_facts: true
+  become: true
+  become_method: sudo
+  vars:
+    cvm_system_role_repo_url: "{{ lookup('env', 'CVM_SYSTEM_ROLE_REPO_URL') }}"
+    cvm_system_role_repo_branch: "{{ lookup('env', 'CVM_SYSTEM_ROLE_REPO_BRANCH') }}"
+    trustee_client_kbs_url: "{{ lookup('env', 'CVM_DEPLOY_TRUSTEE_KBS_URL') }}"
+    trustee_client_kbs_cert_content: "{{ lookup('env', 'CVM_DEPLOY_TRUSTEE_KBS_CERT') }}"
+    trustee_client_encrypt_disk: "{{ lookup('env', 'CVM_DEPLOY_ENCRYPT_DISK') }}"
+    trustee_client_encrypt_disk_mount_point: "{{ lookup('env', 'CVM_DEPLOY_ENCRYPTED_DISK_MOUNT_POINT') }}"
+
+  tasks:
+    - name: Install trustee_client role from GitHub
+      ansible.builtin.command:
+        cmd: ansible-galaxy role install -f git+{{cvm_system_role_repo_url}},{{cvm_system_role_repo_branch}}
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+
+    - name: Apply trustee_client role
+      ansible.builtin.include_role:
+        name: trustee_client
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "✅ Cloud VMs configured successfully!"
+          - "Trustee Guest Components configured via trustee_client role"
+          - "============================================"
+      delegate_to: localhost
+      become: false

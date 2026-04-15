@@ -1,0 +1,125 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+    labels:
+        app: deid-roberta
+    name: deid-roberta
+    namespace: janine-app
+spec:
+    replicas: 1
+    selector:
+        matchLabels:
+            app: deid-roberta
+    template:
+        metadata:
+            labels:
+                app: deid-roberta
+        spec:
+            containers:
+                - env:
+                    - name: UVICORN_DISABLE_IPV6
+                      value: "true"
+                    - name: AZURE_STORAGE_CONNECTION_STRING
+                      valueFrom:
+                        secretKeyRef:
+                            key: connection-string
+                            name: azure-sealed
+                  image: quay.io/confidential-devhub/hospital-janine-app@sha256:8f2e4506b67a465e42e3d26d003eced8d5c65559a7d8fd7cfe62e9b6759bba95
+                  imagePullPolicy: Always
+                  livenessProbe:
+                    httpGet:
+                        path: /health
+                        port: 8080
+                    initialDelaySeconds: 60
+                    periodSeconds: 30
+                    timeoutSeconds: 5
+                  name: deid-roberta
+                  ports:
+                    - containerPort: 8080
+                      name: http
+                      protocol: TCP
+                  readinessProbe:
+                    httpGet:
+                        path: /health
+                        port: 8080
+                    initialDelaySeconds: 30
+                    periodSeconds: 10
+                    timeoutSeconds: 5
+                  resources:
+                    limits:
+                        cpu: 2000m
+                        memory: 4Gi
+                    requests:
+                        cpu: 500m
+                        memory: 2Gi
+                - env:
+                    - name: POD_NAME
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: POD_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: COLLECTOR_URL
+                      value: https://attestation-collector-secure-raj-compliance-dashboard.apps.uml9d8rjadd09bf3f0.eastus.aroapp.io
+                    - name: TEE_TYPE
+                      value: snp
+                    - name: REPORT_INTERVAL
+                      value: "30"
+                    - name: CLIENT_CERT_FILE
+                      value: /etc/certs/client.crt
+                    - name: CLIENT_KEY_FILE
+                      value: /etc/certs/client.key
+                    - name: CA_CERT_FILE
+                      value: /etc/certs/ca.crt
+                  image: quay.io/confidential-devhub/attestation-collector-sidecar-secure:latest
+                  name: coco-beacon-sidecar
+                  volumeMounts:
+                    - mountPath: /etc/certs
+                      name: client-certs
+                      readOnly: true
+                - env:
+                    - name: TLS_CERT_URI
+                      value: kbs:///default/sidecar-tls-deid-roberta/server-cert
+                    - name: TLS_KEY_URI
+                      value: kbs:///default/sidecar-tls-deid-roberta/server-key
+                    - name: CLIENT_CA_URI
+                      value: kbs:///default/sidecar-tls/client-ca
+                    - name: HTTPS_PORT
+                      value: "8443"
+                    - name: POD_NAME
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.name
+                    - name: POD_NAMESPACE
+                      valueFrom:
+                        fieldRef:
+                            fieldPath: metadata.namespace
+                    - name: FORWARD_PORT
+                      value: "8080"
+                  image: quay.io/confidential-devhub/coco-secure-access-sidecar:latest
+                  name: coco-secure-access
+                  ports:
+                    - containerPort: 8443
+                      name: https
+                      protocol: TCP
+                  resources:
+                    limits:
+                        cpu: 100m
+                        memory: 128Mi
+                    requests:
+                        cpu: 50m
+                        memory: 64Mi
+            runtimeClassName: kata-remote
+            volumes:
+                - name: client-certs
+                  secret:
+                    items:
+                        - key: client.crt
+                          path: client.crt
+                        - key: client.key
+                          path: client.key
+                        - key: ca.crt
+                          path: ca.crt
+                    secretName: attestation-collector-certs-sealed

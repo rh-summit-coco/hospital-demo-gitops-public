@@ -1,0 +1,103 @@
+---
+apiVersion: tekton.dev/v1
+kind: Task
+metadata:
+  annotations:
+    tekton.dev/categories: Infrastructure
+    tekton.dev/displayName: Create AWS VM
+    tekton.dev/pipelines.minVersion: 0.17.0
+    tekton.dev/platforms: linux/amd64
+    tekton.dev/tags: aws,vm,infrastructure
+  labels:
+    app.kubernetes.io/version: '0.1'
+  name: create-aws-vm
+  namespace: janine-dev
+spec:
+  description: 'Creates an AWS Confidential VM using AWS CLI.'
+  params:
+  - description: AWS VM name
+    name: VM_NAME
+    type: string
+    default: "deid-roberta-aws-vm"
+  - description: AMI ID
+    name: AMI_ID
+    type: string
+    default: "ami-02762b8edc35b8024"
+  - description: AWS instance type
+    name: INSTANCE_TYPE
+    type: string
+    default: "m6a.large"
+  - description: AWS region
+    name: AWS_REGION
+    type: string
+    default: "us-east-2"
+  - description: AWS subnet ID
+    name: SUBNET_ID
+    type: string
+    default: "subnet-062466bbf61dec451"
+  - description: AWS security group ID
+    name: SECURITY_GROUP_ID
+    type: string
+    default: "sg-060626dc4f93b862e"
+  - description: AWS key pair name
+    name: KEY_PAIR_NAME
+    type: string
+    default: "bigrock-demo"
+  - description: AWS data disk size
+    name: DATA_DISK_SIZE
+    type: string
+    default: "10"
+  results:
+  - description: Public IP address of the created VM
+    name: VM_IP
+    type: string
+  steps:
+  - name: create-vm
+    image: public.ecr.aws/aws-cli/aws-cli:latest
+    volumeMounts:
+    - name: aws-credentials-bigrock
+      mountPath: /root/.aws
+    command: ["/bin/bash", "-c"]
+    args: 
+      - |
+        echo "=== Checking if VM exists ==="
+        VM_IP=$(aws ec2 describe-instances \
+          --filters "Name=tag:Name,Values=$(params.VM_NAME)" \
+                    "Name=instance-state-name,Values=running" \
+          --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+        if [ "$VM_IP" != "None" ]; then
+          echo "VM already exists"
+        else
+          echo "=== Creating AWS VM ==="
+          aws ec2 run-instances \
+            --image-id $(params.AMI_ID) \
+            --instance-type $(params.INSTANCE_TYPE) \
+            --key-name $(params.KEY_PAIR_NAME) \
+            --region $(params.AWS_REGION) \
+            --cpu-options AmdSevSnp=enabled \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$(params.VM_NAME)}]" \
+            --block-device-mappings '[{"DeviceName":"/dev/sdb","Ebs":{"VolumeSize":$(params.DATA_DISK_SIZE), "DeleteOnTermination":true,"VolumeType":"gp3"}}]'
+            # --subnet-id $(params.SUBNET_ID)
+            # --security-group-id $(params.SECURITY_GROUP_ID)
+          for attempt in $(seq 1 60); do
+            VM_IP=$(aws ec2 describe-instances \
+              --filters "Name=tag:Name,Values=$(params.VM_NAME)" \
+                        "Name=instance-state-name,Values=running" \
+              --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+            [ -n "$VM_IP" ] && [ "$VM_IP" != "None" ] && break
+            sleep 5
+          done
+        fi
+        echo "VM IP: $VM_IP"
+        
+        # Save VM IP to result
+        printf "%s" "$VM_IP" > $(results.VM_IP.path)
+        
+        echo "============================================"
+        echo "✅ AWS VM deployed successfully!"
+        echo "VM IP: $VM_IP"
+        echo "============================================"
+  volumes:
+  - name: aws-credentials-bigrock
+    secret:
+      secretName: aws-credentials-bigrock

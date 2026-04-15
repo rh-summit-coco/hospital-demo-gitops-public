@@ -1,0 +1,30 @@
+apiVersion: tekton.dev/v1
+kind: PipelineRun
+metadata:
+  name: test-coco2
+  namespace: janine-dev
+spec:
+  serviceAccountName: pipeline
+  pipelineRef:
+    name: coco-pipeline
+  params:
+  - name: app-repo-url
+    value: https://github.com/rh-summit-coco/hospital-demo-gitops.git
+  - name: app-repo-branch
+    value: prod
+  - name: source-manifest
+    value: application/deid-roberta/templates/deployment.yaml
+  - name: target-manifest-dir
+    value: application/deid-roberta/manifests
+  workspaces:
+  - name: shared-ws
+    volumeClaimTemplate:
+      spec:
+        accessModes:
+        - ReadWriteOnce
+        resources:
+          requests:
+            storage: 5Gi
+  - name: git-credentials-ws
+    secret:
+      secretName: gitops-git-credentials  # same secret as task-update-gitops

@@ -1,0 +1,36 @@
+# RBAC for ArgoCD Application Controller to manage resources in janine-app namespace
+# This resolves the "namespace is not managed" error
+# Apply this only if Argo runs in the cluster that is managing
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: argocd-application-controller
+  namespace: janine-app
+rules:
+- apiGroups:
+  - ""
+  - "*"
+  resources:
+  - "*"
+  verbs:
+  - Get
+  - List
+  - Watch
+  - Patch
+  - Create
+  - Update
+  - Delete
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: argocd-application-controller-binding
+  namespace: janine-app
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: argocd-application-controller
+subjects:
+- kind: ServiceAccount
+  name: openshift-gitops-argocd-application-controller
+  namespace: openshift-gitops

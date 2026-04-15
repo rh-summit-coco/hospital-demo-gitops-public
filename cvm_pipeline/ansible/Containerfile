@@ -1,0 +1,11 @@
+FROM registry.access.redhat.com/ubi9/ubi:latest
+
+RUN dnf install -y python3 python3-pip openssh-clients git
+
+RUN pip3 install ansible-core
+
+RUN ansible-galaxy collection install ansible.posix
+
+WORKDIR /ansible
+
+CMD ["ansible-playbook", "--version"]

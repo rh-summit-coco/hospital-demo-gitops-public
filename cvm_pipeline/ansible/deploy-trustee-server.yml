@@ -1,0 +1,145 @@
+---
+# Ansible playbook to deploy Trustee server (trustee_attestation_server role + optional KBS/RVPS/AS artifacts).
+#
+# Host split:
+#   - Ansible controller (localhost): trustee_secrets_source_dir — Jenkins agent / CI runner; files are read from here.
+#   - hosts: deployed_vms — Trustee VM(s); /tmp staging + podman cp run here only.
+#   copy: src= is always on the controller; dest= is on the managed host (remote_src: false).
+- name: Wait for VMs and prepare inventory
+  hosts: localhost
+  gather_facts: false
+  vars:
+    server_ip: "{{ lookup('env', 'SERVER_IP') | from_json }}"
+    ssh_private_key_path: "/tmp/ssh-key/id_rsa"
+
+  tasks:
+    - name: Wait for VMs to be ready (SSH)
+      ansible.builtin.wait_for:
+        host: "{{ item.ip }}"
+        port: 22
+        timeout: 600
+      loop: "{{ server_ip }}"
+
+    - name: Add VMs to inventory
+      ansible.builtin.add_host:
+        name: "{{ item.ip }}"
+        ansible_host: "{{ item.ip }}"
+        ansible_user: "{{ item.user}}"
+        ansible_ssh_private_key_file: "{{ ssh_private_key_path }}"
+        ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+        groups: deployed_vms
+      loop: "{{ server_ip }}"
+
+- name: Configure VM with trustee_server role
+  hosts: deployed_vms
+  gather_facts: true
+  become: true
+  become_method: sudo
+  vars:
+    trustee_server_system_role_repo_url: "https://github.com/litian1992/trustee_attestation_server"
+    trustee_server_system_role_repo_branch: "main"
+    trustee_server_secret_registration_enabled: "{{ lookup('env', 'DEPLOY_SECRET_REGISTRATION_SERVER') }}"
+    # Path on the Ansible controller only (not on deployed_vms). Override with TRUSTEE_SECRETS_SOURCE_DIR.
+    trustee_secrets_source_dir: "{{ lookup('env', 'TRUSTEE_SECRETS_SOURCE_DIR') | default('/root/jenkins/secrets', true) }}"
+
+  tasks:
+    - name: Install trustee_server role from GitHub
+      ansible.builtin.command:
+        cmd: ansible-galaxy role install -f git+{{trustee_server_system_role_repo_url}},{{trustee_server_system_role_repo_branch}}
+      delegate_to: localhost
+      become: false
+      run_once: true
+      changed_when: false
+
+    - name: Apply trustee_server role
+      ansible.builtin.include_role:
+        name: trustee_attestation_server
+
+    # Push from controller → deployed_vms, then podman on the Trustee VM.
+    - name: Stage secrets on Trustee server and load into Podman
+      block:
+        - name: Remove old staging directory on Trustee server (deployed_vms)
+          ansible.builtin.file:
+            path: /tmp/kbs_default
+            state: absent
+
+        - name: Copy Trustee secrets from controller to Trustee server
+          ansible.builtin.copy:
+            src: "{{ trustee_secrets_source_dir }}/{{ item.src }}"
+            dest: "{{ item.dest }}"
+            mode: "{{ item.mode }}"
+            remote_src: false
+          loop:
+            - src: kbs_default/
+              dest: /tmp/kbs_default/
+              mode: preserve
+            - src: reference-values.json
+              dest: /tmp/reference-values.json
+              mode: "0644"
+            - src: default_cpu.rego
+              dest: /tmp/default_cpu.rego
+              mode: "0644"
+          loop_control:
+            label: "{{ item.dest }}"
+
+        - name: Load Trustee artifacts into Podman containers (on deployed_vms)
+          become: true
+          become_user: root
+          ansible.builtin.shell: |
+            set -euo pipefail
+            podman cp /tmp/kbs_default/. trustee-kbs:/var/lib/kbs/repository/default/
+            podman cp /tmp/reference-values.json trustee-rvps:/var/lib/rvps/reference_values/
+            podman cp /tmp/default_cpu.rego trustee-as:/opt/confidential-containers/attestation-service/token/ear/policies/opa/
+
+        - name: Generate attestation-server-certs
+          ansible.builtin.shell: |
+            set -euo pipefail
+            [ -d /etc/attestation-server-certs ] || mkdir -p /etc/attestation-server-certs
+            if [ ! -f /etc/attestation-server-certs/ca.crt ]; then
+              openssl genrsa -out /etc/attestation-server-certs/ca.key 4096
+              openssl req -x509 -new -nodes -key /etc/attestation-server-certs/ca.key \
+                -sha256 -days 3650 -out /etc/attestation-server-certs/ca.crt \
+                -subj "/CN=Trustee-Server-CA"
+              openssl genrsa -out /etc/attestation-server-certs/server.key 2048
+              openssl req -new -key /etc/attestation-server-certs/server.key \
+                -out /etc/attestation-server-certs/server.csr \
+                -subj "/CN=$(hostname -f)" \
+                -addext "subjectAltName = DNS:$(hostname -f)"
+              openssl x509 -req -in /etc/attestation-server-certs/server.csr \
+                -CA /etc/attestation-server-certs/ca.crt -CAkey /etc/attestation-server-certs/ca.key \
+                -CAcreateserial -out /etc/attestation-server-certs/server.crt -days 365 -sha256
+            fi
+
+        - name: Run attestation-collector and raj-hospital-dashboard Podman containers
+          become: true
+          become_user: root
+          ansible.builtin.shell: |
+            set -euo pipefail
+            podman rm -f attestation-collector raj-hospital-dashboard 2>/dev/null || true
+            podman run -d --name attestation-collector --network host -e PORT='8082' \
+              -e HTTPS_PORT='8443' -e ENABLE_MTLS='true' -e SERVER_CERT_FILE='/etc/certs/server.crt' \
+              -e SERVER_KEY_FILE='/etc/certs/server.key' -e CA_CERT_FILE='/etc/certs/ca.crt' \
+              -v /etc/attestation-server-certs/:/etc/certs/:Z quay.io/litian/attestation-collector-secure:latest
+            podman run -d --name raj-hospital-dashboard --network host -e PORT='8083' \
+              -e COLLECTOR_URL='http://localhost:8082' quay.io/litian/raj-dashboard-backend
+
+        - name: Remove staged Trustee secrets from Trustee server
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - /tmp/kbs_default
+            - /tmp/reference-values.json
+            - /tmp/default_cpu.rego
+          loop_control:
+            label: "{{ item }}"
+
+    - name: Display deployment summary
+      ansible.builtin.debug:
+        msg:
+          - "============================================"
+          - "✅ Trustee server configured successfully!"
+          - "Trustee server configured via trustee_server role"
+          - "============================================"
+      delegate_to: localhost
+      become: false

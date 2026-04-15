@@ -1,0 +1,2 @@
+# Local overrides with real credentials (do not commit)
+secrets/*-local.yaml

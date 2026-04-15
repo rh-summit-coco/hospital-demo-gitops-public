@@ -1,0 +1,21 @@
+# TriggerBinding for GitHub push → coco-pipeline.
+# Extracts params from GitHub webhook payload (push to GitOps repo by Tekton).
+apiVersion: triggers.tekton.dev/v1beta1
+kind: TriggerBinding
+metadata:
+  name: coco-github-push-binding
+  namespace: janine-dev
+spec:
+  params:
+    - name: app-repo-url
+      value: $(body.repository.clone_url)
+    - name: app-repo-branch
+      value: $(extensions.branch_name)
+    - name: source-manifest
+      value: application/deid-roberta/templates/deployment.yaml
+    - name: target-manifest-dir
+      value: application/deid-roberta/manifests
+    - name: repo-name
+      value: $(body.repository.name)
+    - name: commit-sha
+      value: $(body.head_commit.id)
