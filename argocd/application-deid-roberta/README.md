@@ -5,7 +5,7 @@ This directory contains ArgoCD configuration to automatically deploy and update 
 ## Overview
 
 The ArgoCD Application monitors:
-1. **Application Folder**: Any changes in the `application/deid-roberta/manifests` folder in the `prod` branch trigger a redeployment (including [`deployment.yaml`](../../application/deid-roberta/manifests/deployment.yaml) and [`deployment-sealed-secrets.yaml`](../../application/deid-roberta/manifests/deployment-sealed-secrets.yaml); edit **`TODO`** placeholders in the latter before sync).
+1. **Application Folder**: Any changes in the `application/deid-roberta/manifests` folder in the `main` branch trigger a redeployment (including [`deployment.yaml`](../../application/deid-roberta/manifests/deployment.yaml) and [`deployment-sealed-secrets.yaml`](../../application/deid-roberta/manifests/deployment-sealed-secrets.yaml); edit **`TODO`** placeholders in the latter before sync).
 
 **Note**: The coco pipeline automatically updates the GitOps repository with new image digests after each successful build, which triggers ArgoCD to automatically sync and deploy the new image.
 
@@ -48,7 +48,7 @@ oc apply -f argocd/application-deid-roberta/repository-secret.yaml
 oc apply -f argocd/application-deid-roberta/deid-roberta-app.yaml
 ```
 
-The application will automatically sync when you push changes to the `application/` folder in the `prod` branch.
+The application will automatically sync when you push changes to the `application/` folder in the `main` branch.
 
 ### Automatic Image Updates via Pipeline
 
@@ -71,7 +71,7 @@ This ensures that ArgoCD always deploys the exact image that was built and pushe
 
 ### Application Folder Monitoring
 
-1. ArgoCD watches the `application/` folder in the `prod` branch of the Git repository
+1. ArgoCD watches the `application/` folder in the `main` branch of the Git repository
 2. When changes are detected (commits pushed to the repo), ArgoCD automatically syncs
 3. The application is redeployed with the new configuration
 
@@ -79,7 +79,7 @@ This ensures that ArgoCD always deploys the exact image that was built and pushe
 
 ### ArgoCD Application
 
-- **Source**: `application/` folder in the Git repository (`prod` branch)
+- **Source**: `application/` folder in the Git repository (`main` branch)
 - **Destination**: `janine-app` namespace
 - **Sync Policy**: Automated with self-healing enabled
 

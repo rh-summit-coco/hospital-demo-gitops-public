@@ -28,7 +28,7 @@ spec:
       default: https://github.com/rh-summit-coco/hospital-demo-gitops.git
     - name: gitops-branch
       description: Git branch in GitOps repository to update
-      default: prod
+      default: main
     - name: deployment-path
       description: Path to deployment.yaml file in GitOps repository
       default: application/deid-roberta/templates/deployment.yaml

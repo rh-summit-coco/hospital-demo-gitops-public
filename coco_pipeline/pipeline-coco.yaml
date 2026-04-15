@@ -19,7 +19,7 @@ spec:
       description: App repository URL (requires auth)
       name: app-repo-url
       type: string
-    - default: prod
+    - default: main
       description: App repository branch
       name: app-repo-branch
       type: string

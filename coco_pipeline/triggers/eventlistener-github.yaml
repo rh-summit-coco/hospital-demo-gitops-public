@@ -26,12 +26,12 @@ spec:
             - name: "eventTypes"
               value:
                 - "push"
-        # Only prod branch; set extensions.branch_name so TriggerBinding gets app-repo-branch
+        # Only main branch; set extensions.branch_name so TriggerBinding gets app-repo-branch
         - ref:
             name: "cel"
           params:
             - name: "filter"
-              value: "body.ref == 'refs/heads/prod' && body.head_commit.author.email == 'tekton@openshift.local'"
+              value: "body.ref == 'refs/heads/main' && body.head_commit.author.email == 'tekton@openshift.local'"
             - name: "overlays"
               value:
                 - key: branch_name

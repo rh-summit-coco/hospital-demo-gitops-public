@@ -23,7 +23,7 @@ spec:
     description: Repository URL to clone from
   - name: git-revision
     type: string
-    default: prod
+    default: main
     description: Git revision to checkout
   - name: dest-repo
     type: string
@@ -47,7 +47,7 @@ spec:
     description: GitOps repository URL to update with image digest
   - name: gitops-branch
     type: string
-    default: prod
+    default: main
     description: Git branch in GitOps repository to update
   - name: deployment-path
     type: string

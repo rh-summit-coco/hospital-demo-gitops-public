@@ -17,7 +17,7 @@ spec:
     - name: git-branch
       type: string
       description: Git branch to checkout
-      default: "prod"
+      default: "main"
     - name: image-name
       type: string
       description: Name of the image to build

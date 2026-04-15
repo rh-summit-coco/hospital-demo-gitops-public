@@ -11,7 +11,7 @@ spec:
   - name: git-url
     value: https://github.com/confidential-devhub/deid_roberta.git
   - name: git-revision
-    value: prod
+    value: main
   - name: dest-repo
     value: quay.io/confidential-devhub
   - name: image-name

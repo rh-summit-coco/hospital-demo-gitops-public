@@ -26,7 +26,7 @@ spec:
           params:
             - name: "filter"
               value: |
-                body.ref == 'refs/heads/prod' &&
+                body.ref == 'refs/heads/main' &&
                 body.head_commit.author.email == 'coco@openshift.local' &&
                 (
                   size(body.commits) > 0 &&

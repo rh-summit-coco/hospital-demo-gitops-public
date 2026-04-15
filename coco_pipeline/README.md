@@ -107,7 +107,7 @@ tkn pipelinerun logs -f coco-pipeline-run -n janine-dev
 | `cococtl-repo-url`   | `https://github.com/esposem/cococtl`   | cococtl repository URL               |
 | `cococtl-branch`     | `improvements`                         | Branch to clone and build            |
 | `app-repo-url`       | (set in PipelineRun)                   | App repository URL (auth required)   |
-| `app-repo-branch`    | `prod`                                 | App repository branch                |
+| `app-repo-branch`    | `main`                                 | App repository branch                |
 | `app-manifest`       | `application/deployment.yaml`         | Manifest file in app repo to apply   |
 | `runtime-class`      | `kata-remote`                         | CoCo runtime class                   |
 | `trustee-namespace`  | `trustee-operator-system`             | Trustee operator namespace           |

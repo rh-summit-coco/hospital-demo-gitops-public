@@ -163,7 +163,7 @@ The pipeline automatically updates the GitOps repository with the image digest a
 
 **Configuration:**
 - GitOps repo URL: Set via `gitops-repo-url` parameter (default: `https://github.com/rh-summit-coco/hospital-demo-gitops.git`)
-- Git branch: Set via `gitops-branch` parameter (default: `prod`)
+- Git branch: Set via `gitops-branch` parameter (default: `main`)
 - Deployment path: Set via `deployment-path` parameter (default: `application/deployment.yaml`)
 
 ## Differences from Original Pipeline

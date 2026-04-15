@@ -44,7 +44,7 @@ spec:
   - description: Branch or revision for playbooks repository
     name: GIT_BRANCH
     type: string
-    default: "prod"
+    default: "main"
   workspaces:
     - name: source
       description: Workspace for source code

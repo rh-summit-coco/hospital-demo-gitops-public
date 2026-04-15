@@ -11,7 +11,7 @@ spec:
   - name: app-repo-url
     value: https://github.com/rh-summit-coco/hospital-demo-gitops.git
   - name: app-repo-branch
-    value: prod
+    value: main
   - name: source-manifest
     value: application/deid-roberta/templates/deployment.yaml
   - name: target-manifest-dir

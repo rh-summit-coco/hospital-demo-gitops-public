@@ -47,12 +47,12 @@ To have Argo CD notice new commits without relying only on polling, add a reposi
 
 ## Manual update (fallback)
 
-To trigger a sync by changing Git, edit the manifests under `application/deid-roberta/manifests` (for example the image in `deployment.yaml`), commit, and push to the branch Argo CD tracks (for example `prod`):
+To trigger a sync by changing Git, edit the manifests under `application/deid-roberta/manifests` (for example the image in `deployment.yaml`), commit, and push to the branch Argo CD tracks (for example `main`):
 
 ```bash
 git add application/deid-roberta/manifests/
 git commit -m "Update deployment manifests"
-git push origin prod
+git push origin main
 ```
 
 Argo CD will pick up the change according to its sync policy. Image digests can also be updated automatically by the CI pipeline; details are in [application-deid-roberta/README.md](application-deid-roberta/README.md).

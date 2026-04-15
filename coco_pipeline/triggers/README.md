@@ -1,10 +1,10 @@
 # Coco Pipeline Triggers (GitHub)
 
-Trigger **coco-pipeline** when the GitOps repo receives a push to **prod** authored by **tekton@openshift.local** (e.g. after the build pipeline’s update-gitops task pushes).
+Trigger **coco-pipeline** when the GitOps repo receives a push to **main** authored by **tekton@openshift.local** (e.g. after the build pipeline’s update-gitops task pushes).
 
 ## Components
 
-- **EventListener** (`eventlistener-github.yaml`) – Listens for GitHub push (validates with same webhook secret as ArgoCD), CEL filter: prod branch (and optionally author email)
+- **EventListener** (`eventlistener-github.yaml`) – Listens for GitHub push (validates with same webhook secret as ArgoCD), CEL filter: main branch (and optionally author email)
 - **TriggerBinding** (`triggerbinding-github.yaml`) – Maps webhook payload to coco params (app-repo-url from repo, branch from ref)
 - **TriggerTemplate** (`triggertemplate-coco-pipeline.yaml`) – Creates a PipelineRun for coco-pipeline
 - **Route** (`route-eventlistener.yaml`) – Exposes the EventListener for the webhook
@@ -31,7 +31,7 @@ The EventListener **requires** a webhook secret to validate GitHub requests. It 
    - **Secret**: same value as ArgoCD webhook (the value stored in `github-webhook-secret`)
    - **Events**: Just the push event
 
-Only pushes to **prod** trigger coco-pipeline (CEL filter). Pushes to other branches are ignored by this listener.
+Only pushes to **main** trigger coco-pipeline (CEL filter). Pushes to other branches are ignored by this listener.
 
 ## Troubleshooting
 
@@ -69,7 +69,7 @@ If the webhook does not trigger the coco pipeline:
      ```bash
      oc get clusterrole tekton-triggers-eventlistener-roles tekton-triggers-eventlistener-clusterroles
      ```
-   - **CEL filter** – Only requests that pass the filter create a PipelineRun. Current filter: `body.ref == 'refs/heads/prod'` (push to `prod` only). If you also filter by author (e.g. `body.head_commit.author.email == 'tekton@openshift.local'`), ensure the push that hits the webhook matches.
+   - **CEL filter** – Only requests that pass the filter create a PipelineRun. Current filter: `body.ref == 'refs/heads/main'` (push to `main` only). If you also filter by author (e.g. `body.head_commit.author.email == 'tekton@openshift.local'`), ensure the push that hits the webhook matches.
    - **EventListener logs** – Failures creating the PipelineRun are logged in the EventListener pod:
      ```bash
      oc logs -n janine-dev -l eventlistener=coco-github-listener -c event-listener --tail=100

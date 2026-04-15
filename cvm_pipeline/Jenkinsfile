@@ -2,7 +2,7 @@
 // Intended for RHEL agents (label 'rhel' — change agent { label 'rhel' } as needed).
 //
 // Container images from Tekton → RHEL agent RPMs / CLI:
-//   mcr.microsoft.com/azure-cli     → azure-cli (packages-microsoft-prod)
+//   mcr.microsoft.com/azure-cli     → azure-cli (packages-microsoft-main)
 //   public.ecr.aws/aws-cli/aws-cli  → AWS CLI v2 zip (curl + unzip + aws/install)
 //   openshift-pipelines git-init      → git + https clone
 //   cvm-ansible image               → ansible-core, openssh-clients, python3-pyyaml (dnf)
@@ -25,7 +25,7 @@ pipeline {
     booleanParam(name: 'DEPLOY_TRUSTEE_SERVER', defaultValue: false, description: 'When true, run the Deploy Trustee server stage')
     string(name: 'TRUSTEE_SERVER_IP', defaultValue: '', description: 'IP address of the Trustee server')
     string(name: 'CVM_DEPLOY_ENCRYPT_DISK', defaultValue: 'true', description: 'Passed to vm-configure Ansible role')
-    string(name: 'GIT_BRANCH', defaultValue: 'prod', description: 'Branch for optional git fetch in Configure (if USE_GIT_FETCH=true)')
+    string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Branch for optional git fetch in Configure (if USE_GIT_FETCH=true)')
     string(name: 'GIT_URL', defaultValue: 'github.com/rh-summit-coco/hospital-demo-gitops.git', description: 'Repo for USE_GIT_FETCH')
     string(name: 'CVM_DEPLOY_TRUSTEE_KBS_URL', defaultValue: 'https://kbs-service-trustee-operator-system.apps.uml9d8rjadd09bf3f0.eastus.aroapp.io', description: 'Trustee KBS URL')
     text(name: 'CVM_DEPLOY_TRUSTEE_KBS_CERT', defaultValue: '', description: 'Trustee KBS PEM')
