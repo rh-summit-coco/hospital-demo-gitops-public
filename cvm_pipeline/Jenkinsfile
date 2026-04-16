@@ -14,7 +14,7 @@
 //   Secret file: aws-credentials-file (contents of ~/.aws/credentials for the AWS stage)
 
 pipeline {
-  agent { label 'litian-rhel10' }
+  agent { label 'user-rhel10' }
 
   options {
     timestamps()

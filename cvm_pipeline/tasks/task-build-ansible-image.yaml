@@ -39,12 +39,12 @@ spec:
       - name: GIT_USERNAME
         valueFrom:
           secretKeyRef:
-            name: litian-git-credential
+            name: user-git-credential
             key: username
       - name: GIT_PASSWORD
         valueFrom:
           secretKeyRef:
-            name: litian-git-credential
+            name: user-git-credential
             key: password
       script: |
         #!/bin/bash

@@ -68,7 +68,7 @@ These secrets are **not** committed as files; create them in the cluster (prefer
 | **`azure-credentials`** | Azure service principal: `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`. |
 | **`azure-ssh-key`** | SSH key for VM access; must include `id_rsa.pub` (and private key if required by your flow). |
 | **`aws-credentials-bigrock`** | AWS credentials file for the AWS VM task (see `task-create-aws-vm.yaml`). |
-| **`litian-git-credential`** | Git HTTPS user/password (or equivalent) for tasks that clone private repos; see `task-configure-vm.yaml` and `task-build-ansible-image.yaml`. |
+| **`user-git-credential`** | Git HTTPS user/password (or equivalent) for tasks that clone private repos; see `task-configure-vm.yaml` and `task-build-ansible-image.yaml`. |
 
 **Checklist:** Create the secrets above, then create the `azure-ssh-key` binding before running the example `PipelineRun`. Align Git credentials with the same values you use in [`build_pipeline/secrets/secret-gitops-git-credentials.yaml`](../build_pipeline/secrets/secret-gitops-git-credentials.yaml) where applicable.
 

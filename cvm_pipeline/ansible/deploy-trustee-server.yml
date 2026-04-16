@@ -36,7 +36,7 @@
   become: true
   become_method: sudo
   vars:
-    trustee_server_system_role_repo_url: "https://github.com/litian1992/trustee_attestation_server"
+    trustee_server_system_role_repo_url: "https://github.com/linux-system-roles/trustee_attestation_server"
     trustee_server_system_role_repo_branch: "main"
     trustee_server_secret_registration_enabled: "{{ lookup('env', 'DEPLOY_SECRET_REGISTRATION_SERVER') }}"
     # Path on the Ansible controller only (not on deployed_vms). Override with TRUSTEE_SECRETS_SOURCE_DIR.
@@ -119,9 +119,9 @@
             podman run -d --name attestation-collector --network host -e PORT='8082' \
               -e HTTPS_PORT='8443' -e ENABLE_MTLS='true' -e SERVER_CERT_FILE='/etc/certs/server.crt' \
               -e SERVER_KEY_FILE='/etc/certs/server.key' -e CA_CERT_FILE='/etc/certs/ca.crt' \
-              -v /etc/attestation-server-certs/:/etc/certs/:Z quay.io/litian/attestation-collector-secure:latest
+              -v /etc/attestation-server-certs/:/etc/certs/:Z quay.io/confidential-devhub/attestation-collector-secure:latest
             podman run -d --name raj-hospital-dashboard --network host -e PORT='8083' \
-              -e COLLECTOR_URL='http://localhost:8082' quay.io/litian/raj-dashboard-backend
+              -e COLLECTOR_URL='http://localhost:8082' quay.io/confidential-devhub/raj-dashboard-backend
 
         - name: Remove staged Trustee secrets from Trustee server
           ansible.builtin.file:
