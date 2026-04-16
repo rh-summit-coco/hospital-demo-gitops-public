@@ -1,0 +1,23 @@
+name: Trigger Jenkins on Manifest Change
+on:
+  push:
+    branches:
+      - prod
+    paths:
+      - 'application/deid-roberta/manifests/deployment.yaml'
+
+jobs:
+  trigger:
+    # Check the author email condition here
+    if: endsWith(github.event.head_commit.author.email, '@redhat.com')
+    runs-on: user-relay
+    steps:
+      - name: Trigger Jenkins Pipeline
+        uses: appleboy/jenkins-action@v1.2.0
+        with:
+          url: "JENKINS_URL"
+          user: "user"
+          token: ${{ secrets.JENKINS_API_TOKEN }}
+          job: "JENKINS_JOB"
+          insecure: true
+          parameters: "GIT_BRANCH=prod,GIT_URL=github.com/rh-summit-coco/hospital-demo-gitops-public.git"
