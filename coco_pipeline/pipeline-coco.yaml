@@ -7,11 +7,11 @@ spec:
   description: |
     CoCo pipeline: pull cococtl, pull app repo, auth to cluster, run cococtl init and apply.
   params:
-    - default: 'https://github.com/esposem/cococtl'
+    - default: 'https://github.com/confidential-devhub/cococtl'
       description: cococtl repository URL
       name: cococtl-repo-url
       type: string
-    - default: improvements
+    - default: main
       description: cococtl branch
       name: cococtl-branch
       type: string

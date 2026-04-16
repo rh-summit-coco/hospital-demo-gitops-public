@@ -112,8 +112,8 @@ pipeline {
           steps {
             withCredentials([
               sshUserPrivateKey(credentialsId: 'bigrock-ssh-key-global', keyFileVariable: 'SSH_KEY_FILE', usernameVariable: 'SSH_USER_UNUSED'),
-              string(credentialsId: 'azure-esposem-tennant-id', variable: 'AZURE_SP_TENANT_ID'),
-              usernamePassword(credentialsId: 'azure-esposem-coco-client', usernameVariable: 'AZURE_SP_SECRET_USR', passwordVariable: 'AZURE_SP_SECRET_PSW')
+              string(credentialsId: 'azure-user-tennant-id', variable: 'AZURE_SP_TENANT_ID'),
+              usernamePassword(credentialsId: 'azure-user-client', usernameVariable: 'AZURE_SP_SECRET_USR', passwordVariable: 'AZURE_SP_SECRET_PSW')
             ]) {
               sh '''
                 set -euo pipefail

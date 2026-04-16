@@ -6,12 +6,12 @@ This directory contains a Tekton pipeline that builds and runs **cococtl** (Conf
 
 The `coco-pipeline` performs the following steps:
 
-1. **pull-cococtl** – Installs git, make, go; clones the cococtl repo from GitHub (`esposem/cococtl`, branch `improvements`) and runs `make build`.
+1. **pull-cococtl** – Installs git, make, go; clones the cococtl repo from GitHub (`confidential-devhub/cococtl`, branch `main`) and runs `make build`.
 2. **pull-repo** – Clones your application repository (requires authentication; uses the same Git credentials secret as the GitOps update task).
 3. **auth-cluster** – Installs the OpenShift CLI (`oc`) and authenticates to the cluster using the pipeline service account.
 4. **run-cococtl** – Runs cococtl init and apply with sidecar, kata-remote runtime, and Trustee:
    - `kubectl-coco init --enable-sidecar -o coco-config.toml --runtime-class kata-remote --cert-dir=./certs --no-upload --trustee-namespace=trustee-operator-system`
-   - `kubectl-coco apply -f <app-manifest> --skip-apply --sidecar --no-initdata --convert-secrets --config coco-config.toml --cert-dir=./certs`
+   - `kubectl-coco apply -f <source-manifest> --skip-apply --sidecar --no-initdata --convert-secrets --config coco-config.toml --cert-dir=./certs`
 
 The first three tasks run in parallel; **run-cococtl** runs after all of them complete.
 
@@ -93,7 +93,7 @@ oc create secret generic gitops-git-credentials \
 # Apply pipeline
 oc apply -f coco_pipeline/pipeline-coco.yaml
 
-# Create a run (edit pipelinerun-coco.yaml to set app-repo-url and app-manifest if needed)
+# Create a run (edit pipelinerun-coco.yaml to set app-repo-url and source-manifest if needed)
 oc apply -f coco_pipeline/pipelinerun-coco.yaml
 
 # Watch run
@@ -102,15 +102,18 @@ tkn pipelinerun logs -f coco-pipeline-run -n janine-dev
 
 ## Pipeline Parameters
 
-| Parameter            | Default                               | Description                          |
-|----------------------|----------------------------------------|--------------------------------------|
-| `cococtl-repo-url`   | `https://github.com/esposem/cococtl`   | cococtl repository URL               |
-| `cococtl-branch`     | `improvements`                         | Branch to clone and build            |
-| `app-repo-url`       | (set in PipelineRun)                   | App repository URL (auth required)   |
-| `app-repo-branch`    | `main`                                 | App repository branch                |
-| `app-manifest`       | `application/deployment.yaml`         | Manifest file in app repo to apply   |
-| `runtime-class`      | `kata-remote`                         | CoCo runtime class                   |
-| `trustee-namespace`  | `trustee-operator-system`             | Trustee operator namespace           |
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `cococtl-repo-url` | `https://github.com/confidential-devhub/cococtl` | cococtl Git repository URL |
+| `cococtl-branch` | `main` | Branch to clone and build |
+| `app-repo-url` | `https://github.com/rh-summit-coco/hospital-demo-gitops-public.git` | App repository URL (requires auth) |
+| `app-repo-branch` | `main` | App repository branch |
+| `source-manifest` | `application/deid-roberta/templates/deployment.yaml` | Manifest path in the app repo (relative to clone root) |
+| `target-manifest-dir` | `application/deid-roberta/manifests` | Output directory for generated manifests (git push target) |
+| `runtime-class` | `kata-remote` | CoCo runtime class |
+| `trustee-namespace` | `trustee-operator-system` | Trustee operator namespace |
+| `sidecar-image` | `quay.io/confidential-devhub/coco-secure-access-sidecar:latest` | CoCo secure access sidecar image |
+| `beacon-sidecar-image` | `quay.io/confidential-devhub/attestation-collector-sidecar-secure:latest` | Beacon / attestation sidecar image |
 
 Override any of these in the PipelineRun or when triggering the pipeline.
 
@@ -126,7 +129,7 @@ Override any of these in the PipelineRun or when triggering the pipeline.
 - ServiceAccount `pipeline` with cluster access (used for auth-cluster and run-cococtl)
 - **ClusterRoleBinding** `pipeline-list-nodes` applied so the pipeline SA can list nodes (cococtl needs this for node IP auto-detection)
 - Secret `gitops-git-credentials` for the app repo (same format as for update-gitops)
-- App repo must contain the manifest file specified by `app-manifest` (e.g. `app.yaml` or `application/deployment.yaml`)
+- App repo must contain the manifest file specified by `source-manifest` (e.g. `application/deid-roberta/templates/deployment.yaml`)
 - CoCo / Trustee setup on the cluster as expected by cococtl (runtime class, trustee namespace, etc.)
 
 ## Troubleshooting
@@ -134,7 +137,7 @@ Override any of these in the PipelineRun or when triggering the pipeline.
 ### pull-cococtl fails (clone or build)
 
 - Check network from the cluster to GitHub.
-- Confirm branch `improvements` exists in `esposem/cococtl`.
+- Confirm branch `main` exists in `confidential-devhub/cococtl`.
 - If the binary is built to a different path (e.g. `_output/bin/kubectl-coco`), the task or **run-cococtl** may need to be updated to use that path.
 
 ### pull-repo fails (auth)
@@ -162,7 +165,7 @@ Then re-run the pipeline.
 ### run-cococtl fails (binary or manifest not found)
 
 - **Binary:** Ensure **pull-cococtl** completed and the binary is at `shared-ws/cococtl/kubectl-coco`. If your `make build` puts it elsewhere, adjust the path in **task-run-cococtl**.
-- **Manifest:** Ensure **pull-repo** cloned the repo into `shared-ws/app-repo` and that `app-manifest` (e.g. `application/deployment.yaml`) exists under that directory.
+- **Manifest:** Ensure **pull-repo** cloned the repo into `shared-ws/app-repo` and that `source-manifest` (e.g. `application/deid-roberta/templates/deployment.yaml`) exists under that directory.
 - **Cluster:** Ensure kubeconfig was written by **auth-cluster** at `shared-ws/.kube/config` and that the pipeline SA has RBAC to create the resources cococtl applies.
 
 ### Inspecting logs
