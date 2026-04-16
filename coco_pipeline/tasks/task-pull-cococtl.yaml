@@ -9,11 +9,11 @@ spec:
   params:
   - name: cococtl-repo-url
     type: string
-    default: https://github.com/esposem/cococtl
+    default: https://github.com/confidential-devhub/cococtl
     description: cococtl repository URL
   - name: cococtl-branch
     type: string
-    default: improvements
+    default: main
     description: Branch to clone
   steps:
   - name: install-and-build
