@@ -20,7 +20,7 @@ spec:
   - description: GitHub repository URL for Trustee Guest Components quadlet files
     name: CVM_SYSTEM_ROLE_REPO_URL
     type: string
-    default: "https://github.com/litian1992/trustee_client"
+    default: "https://github.com/linux-system-roles/trustee_client"
   - description: Branch or tag to use from the repository
     name: CVM_SYSTEM_ROLE_REPO_BRANCH
     type: string
@@ -40,7 +40,7 @@ spec:
   - description: Git repository URL containing Ansible playbooks
     name: GIT_URL
     type: string
-    default: "github.com/rh-summit-coco/hospital-demo-gitops.git"
+    default: "github.com/rh-summit-coco/hospital-demo-gitops-public.git"
   - description: Branch or revision for playbooks repository
     name: GIT_BRANCH
     type: string

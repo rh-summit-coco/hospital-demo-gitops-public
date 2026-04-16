@@ -13,7 +13,7 @@ spec:
     - name: git-url
       type: string
       description: Git repository URL
-      default: "github.com/rh-summit-coco/hospital-demo-gitops.git"
+      default: "github.com/rh-summit-coco/hospital-demo-gitops-public.git"
     - name: git-branch
       type: string
       description: Git branch to checkout

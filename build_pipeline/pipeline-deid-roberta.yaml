@@ -43,7 +43,7 @@ spec:
     description: Path to Dockerfile
   - name: gitops-repo-url
     type: string
-    default: https://github.com/rh-summit-coco/hospital-demo-gitops.git
+    default: https://github.com/rh-summit-coco/hospital-demo-gitops-public.git
     description: GitOps repository URL to update with image digest
   - name: gitops-branch
     type: string

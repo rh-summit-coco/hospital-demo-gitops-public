@@ -15,7 +15,7 @@ spec:
       description: cococtl branch
       name: cococtl-branch
       type: string
-    - default: 'https://github.com/rh-summit-coco/hospital-demo-gitops.git'
+    - default: 'https://github.com/rh-summit-coco/hospital-demo-gitops-public.git'
       description: App repository URL (requires auth)
       name: app-repo-url
       type: string

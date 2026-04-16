@@ -26,7 +26,7 @@ pipeline {
     string(name: 'TRUSTEE_SERVER_IP', defaultValue: '', description: 'IP address of the Trustee server')
     string(name: 'CVM_DEPLOY_ENCRYPT_DISK', defaultValue: 'true', description: 'Passed to vm-configure Ansible role')
     string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Branch for optional git fetch in Configure (if USE_GIT_FETCH=true)')
-    string(name: 'GIT_URL', defaultValue: 'github.com/rh-summit-coco/hospital-demo-gitops.git', description: 'Repo for USE_GIT_FETCH')
+    string(name: 'GIT_URL', defaultValue: 'github.com/rh-summit-coco/hospital-demo-gitops-public.git', description: 'Repo for USE_GIT_FETCH')
     string(name: 'CVM_DEPLOY_TRUSTEE_KBS_URL', defaultValue: 'https://kbs-service-trustee-operator-system.apps.uml9d8rjadd09bf3f0.eastus.aroapp.io', description: 'Trustee KBS URL')
     text(name: 'CVM_DEPLOY_TRUSTEE_KBS_CERT', defaultValue: '', description: 'Trustee KBS PEM')
   }
@@ -46,7 +46,7 @@ pipeline {
     CVM_DEPLOY_SECRET_REGISTRATION_CLIENT = 'false'
 
     // Defaults aligned with Tekton tasks
-    AZURE_SUBSCRIPTION_ID = '1a84145c-974c-4237-9046-64a34c09752f'
+    AZURE_SUBSCRIPTION_ID = 'INSERT_AZURE_SUBSCRIPTION_ID'
     RESOURCE_GROUP   = 'nodejs-ex-vm-rg'
     AZURE_VM_NAME    = 'deid-roberta-azure-jenkins-vm'
     AZURE_VM_IMAGE   = 'RedHat:rhel-cvm:10_1_cvm:latest'
@@ -61,7 +61,7 @@ pipeline {
     // SECURITY_GROUP_ID = 'sg-060626dc4f93b862e'
     KEY_PAIR_NAME    = 'bigrock-demo'
     AWS_DATA_DISK    = '10'
-    CVM_SYSTEM_ROLE_REPO_URL     = 'https://github.com/litian1992/trustee_client'
+    CVM_SYSTEM_ROLE_REPO_URL     = 'https://github.com/linux-system-roles/trustee_client'
     CVM_SYSTEM_ROLE_REPO_BRANCH  = 'main'
     CVM_DEPLOY_ENCRYPTED_DISK_MOUNT_POINT = '/mnt/encrypted'
   }

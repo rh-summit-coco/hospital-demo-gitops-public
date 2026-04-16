@@ -162,7 +162,7 @@ The pipeline automatically updates the GitOps repository with the image digest a
 5. ArgoCD automatically detects the change and syncs the deployment
 
 **Configuration:**
-- GitOps repo URL: Set via `gitops-repo-url` parameter (default: `https://github.com/rh-summit-coco/hospital-demo-gitops.git`)
+- GitOps repo URL: Set via `gitops-repo-url` parameter (default: `https://github.com/rh-summit-coco/hospital-demo-gitops-public.git`)
 - Git branch: Set via `gitops-branch` parameter (default: `main`)
 - Deployment path: Set via `deployment-path` parameter (default: `application/deployment.yaml`)
 

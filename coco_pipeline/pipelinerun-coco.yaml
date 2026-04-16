@@ -9,7 +9,7 @@ spec:
     name: coco-pipeline
   params:
   - name: app-repo-url
-    value: https://github.com/rh-summit-coco/hospital-demo-gitops.git
+    value: https://github.com/rh-summit-coco/hospital-demo-gitops-public.git
   - name: app-repo-branch
     value: main
   - name: source-manifest

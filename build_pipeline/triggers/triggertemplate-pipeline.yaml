@@ -25,7 +25,7 @@ spec:
       description: Commit message
     - name: gitops-repo-url
       description: GitOps repository URL to update with image digest
-      default: https://github.com/rh-summit-coco/hospital-demo-gitops.git
+      default: https://github.com/rh-summit-coco/hospital-demo-gitops-public.git
     - name: gitops-branch
       description: Git branch in GitOps repository to update
       default: main

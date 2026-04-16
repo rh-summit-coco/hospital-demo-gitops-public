@@ -10,7 +10,7 @@ spec:
 
   # Source: Where to find your application manifests
   source:
-    repoURL: https://github.com/rh-summit-coco/hospital-demo-gitops.git  # Your Git repository URL
+    repoURL: https://github.com/rh-summit-coco/hospital-demo-gitops-public.git  # Your Git repository URL
     targetRevision: main  # Branch, tag, or commit SHA to monitor
     path: application/deid-roberta/manifests  # Path within the repository containing Kubernetes manifests
     # Directory settings
